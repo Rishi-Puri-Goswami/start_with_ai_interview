@@ -12,7 +12,7 @@ class SimpleVoiceRecorder {
         this.audioContext = null;
         this.analyser = null;
         this.microphone = null;
-    this.silenceThreshold = 0.07; // Voice detection sensitivity (lower = more sensitive)
+    this.silenceThreshold = 0.08; // Voice detection sensitivity (lower = more sensitive)
     // Add frame counters to provide hysteresis and avoid flapping in noisy environments
     this.silenceFrames = 0;
     this.voiceFrames = 0;
