@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://startwithaiinterview-production.up.railway.app/api/deepgram-tts';
+const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api/deepgram-tts`;
 
 
 
@@ -12,7 +12,7 @@ class SimpleVoiceRecorder {
         this.audioContext = null;
         this.analyser = null;
         this.microphone = null;
-    this.silenceThreshold = 0.08; // Voice detection sensitivity (lower = more sensitive)
+    this.silenceThreshold = 0.09; // Voice detection sensitivity (lower = more sensitive)
     // Add frame counters to provide hysteresis and avoid flapping in noisy environments
     this.silenceFrames = 0;
     this.voiceFrames = 0;
