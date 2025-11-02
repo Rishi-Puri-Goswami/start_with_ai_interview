@@ -25,16 +25,10 @@ const App = () => {
         <Route path="/:id/login" element={<Login />} />
         {/* <Route path="/:id/upload-resume" element={<ResumeUpload />} /> */}
         <Route path="/:id/interview" element={<Interview />} />
-
       <Route path="/r/o" element={<RegisterOwner />} />
         <Route path="/l/o" element={<LoginOwner />} />
         <Route path="/p/o/:id" element={<ProfileOwner />} />
-
-
         <Route path="*" element={<IDNotFound />} />
-
-
-
       </Routes>
     </Router>
   )
