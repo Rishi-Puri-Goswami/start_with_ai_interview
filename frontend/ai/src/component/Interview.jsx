@@ -54,7 +54,7 @@ const language = interviewDetails.launguage ;
   
   const uploadVideoToImageKit = useCallback(async (videoBlob, sessionId) => {      
     try {
-      const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8001').replace(/\/$/, '');
+      const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://startwithaiinterview-production.up.railway.app').replace(/\/$/, '');
       const authUrl = `${API_BASE_URL}/api/user/imagekit-auth`;
 
       const authResponse = await fetch(authUrl, { credentials: 'include' });

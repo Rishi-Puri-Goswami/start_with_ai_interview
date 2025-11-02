@@ -8,7 +8,7 @@ function createSocket(tokenFromStorage) {
     // If already created, return it
     if (socket) return socket;
 
-    socket = io('http://localhost:8001', {
+    socket = io('https://startwithaiinterview-production.up.railway.app', {
         withCredentials: true,
         auth: { token: tokenFromStorage || null },
         transports: ['websocket'],

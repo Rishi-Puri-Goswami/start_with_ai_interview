@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8001/api/deepgram-tts';
+const API_BASE_URL = 'https://startwithaiinterview-production.up.railway.app/api/deepgram-tts';
 
 
 

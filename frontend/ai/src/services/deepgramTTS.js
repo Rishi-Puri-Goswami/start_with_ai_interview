@@ -1,6 +1,6 @@
 // Frontend TTS service: calls backend Sarvam TTS `/speak` endpoint and falls back to browser TTS when unavailable.
 // Backend base URL (server route mounted at /api/deepgram-tts)
-const API_BASE_URL = 'http://localhost:8001/api/deepgram-tts';
+const API_BASE_URL = 'https://startwithaiinterview-production.up.railway.app/api/deepgram-tts';
 
 
 /**
