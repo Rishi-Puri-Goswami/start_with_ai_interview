@@ -90,7 +90,7 @@ Now analyze the resume below in detail.
 
 
 
-export async function getAiResponse(history = [], resumeText = '', interviewDetails = {}) {
+export async function getAiResponse(history = [], resumeText = '', interviewDetails = {} ,  endTime ,  startTime , currenttime ) {
   const API_KEY = process.env.AI_API_KEY;
   if (!API_KEY) {
     return '[Dev mode] AI key not set. Please configure AI_API_KEY for real answers.';
@@ -126,6 +126,7 @@ const questions = Array.isArray(interviewDetails?.questions)
   // --- Deep system prompt --- 
 
 
+
 console.log("language selected is niniininin ninininin  inininininin " , language);
 console.log("roleofai is " , roleofai);
 console.log("jobtitle is " , jobtitle);
@@ -134,6 +135,9 @@ console.log("minimumSkills is " , minimumSkills);
 console.log("minimumQualification is " , minimumQualification);
 console.log("description is " , description);
 console.log("questions is " , questions);
+console.log("start time" , startTime);
+console.log("end time  " , endTime);
+console.log("current  time" , currenttime);
 
 
 
@@ -215,6 +219,8 @@ const systemText = `
     <li>Stay strictly relevant to the job, company, and industry — never drift to unrelated topics.</li> 
   </ul> 
 
+
+
   <heading>Interview Context</heading>
   <ul> 
     <li><strong>Position:</strong> ${jobtitle}</li> 
@@ -222,8 +228,14 @@ const systemText = `
     <li><strong>Minimum Skills:</strong> ${minimumSkills}</li> 
     <li><strong>Primary Skill Focus:</strong> ${skillsStr}</li> 
     <li><strong>Job Description:</strong> ${description} (Important: Use this as a primary reference to generate relevant questions.)</li> 
-    <li><strong>Interview Duration:</strong> 20–25 minutes. Stop the interview automatically after this time.</li>
-  </ul>
+<li>
+  <strong>Interview Duration:</strong> 
+  The interview started at <strong>${startTime}</strong> and is scheduled to end at <strong>${endTime}</strong>. 
+  The current time is <strong>${currenttime}</strong>. 
+  When the current time reaches or exceeds the end time, you must automatically end the interview by sending only this word: <strong>[END]</strong>.
+</li>
+
+</ul>
 
   <note class="meta"> 
     <strong>Runtime Variables:</strong> ${roleofai}, ${jobtitle}, ${skillsStr}, ${minimumSkills}, ${minimumQualification}, ${description}, [RESUME_CONTENT]. 

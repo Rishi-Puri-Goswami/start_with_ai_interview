@@ -140,7 +140,7 @@ router.post("/speak", async (req, res) => {
 // Handle preflight requests for transcribe endpoint (kept for CORS)
 router.options("/transcribe", (req, res) => {
   const origin = req.headers.origin;
-  if (['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173' , 'https://start-with-ai-interview.vercel.app'].includes(origin)) {
+  if (['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173' , 'https://start-with-ai-interview.vercel.app' , 'https://interview.startwith.live'].includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
   }
@@ -154,7 +154,7 @@ router.post("/transcribe", async (req, res) => {
   try {
     // Add CORS headers - specific origin instead of wildcard for credentials
     const origin = req.headers.origin;
-    if (['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173' , 'https://start-with-ai-interview.vercel.app'].includes(origin)) {
+    if (['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173' , 'https://start-with-ai-interview.vercel.app' , 'https://interview.startwith.live'].includes(origin)) {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Credentials', 'true');
     }

@@ -6,6 +6,7 @@ import { client } from '../redis/redis.js';
 import { IntreviewResult } from '../model/intreviewResult.js';
 import mongoose from 'mongoose';
 import {Candidate} from '../model/usermodel.js';
+import { json } from 'express';
 
 
 
@@ -15,7 +16,7 @@ export function initSocket(server, opts = {}) {
   console.log('🔑 JWT_SECRET loaded:', JWT_SECRET ? 'Yes' : 'No');
   const io = new Server(server, {
     cors: {
-      origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174" , "https://start-with-ai-interview.vercel.app"], 
+      origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174" , "https://start-with-ai-interview.vercel.app" , "https://interview.startwith.live"], 
       methods: ['GET', 'POST'],
       credentials: true,
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cookie']
@@ -90,6 +91,7 @@ console.log(token);
           socket.user = user;
         }
         
+
 
 
         console.log(socket.user ? `✅ Socket authenticated as user ${socket.user._id}` : '❌ Socket authentication failed - no user');
@@ -169,6 +171,7 @@ console.log("📩 Candidate message received:", { sessionId , messageContent });
 
       const key = `interview:${userid}`;
 
+      console.log("Redis key for interview data:", key);
 
       const userintreview = await client.get(key);
 
@@ -176,6 +179,7 @@ console.log("📩 Candidate message received:", { sessionId , messageContent });
       if (!userintreview) {
         return socket.emit("error", "Candidate interview not found. Please upload your resume first.");
       }
+
 
       const interviewData = JSON.parse(userintreview);
       const resumetext = interviewData.resumeText || interviewData.resume || '';
@@ -239,11 +243,42 @@ console.log("📩 Candidate message received:", { sessionId , messageContent });
       console.log("resumetext", resumetext);
       console.log("interviewDetails  skdnnsdnsndosndosdosnd sodnosdosdoooans0ajkaoad ", savedDetails);
 
+let key2 = `interviewtime:${sessionId}:${userid}`;
+
+// Always await Redis get
+let time = await client.get(key2);
+
+if (!time) {
+  const duration = parseInt(savedDetails.duration || "10");
+
+  const startTime = new Date();
+  const endTime = new Date(startTime.getTime() + duration * 60000);
+
+  const formattedStartTime = startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const formattedEndTime = endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const timeObj = {
+    startTime: formattedStartTime,
+    endTime: formattedEndTime
+  };
+
+  await client.set(key2, JSON.stringify(timeObj), "EX", 3600);
+
+  console.log("Interview ends at:", formattedEndTime);
+  time = JSON.stringify(timeObj);
+}
+
+// Parse it once you have the string
+const { startTime, endTime  } = JSON.parse(time);
+
+const currenttime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+console.log("Interview time info: ijijijiji nijijjjjiji iijijijiijijji ", { startTime, endTime, currenttime });
+
+
 
       // console.log( savedDetails);
 
-
-      const aiText = await getAiResponse(history, resumetext, savedDetails);
+      const aiText = await getAiResponse(history, resumetext, savedDetails ,  endTime ,  startTime , currenttime);
       
 
       console.log('AI Response received:', { 

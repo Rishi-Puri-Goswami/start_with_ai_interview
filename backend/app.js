@@ -13,7 +13,7 @@ app.use(express.json({ limit: '50mb' })); // Increase payload limit for audio fi
 app.use(express.urlencoded({ limit: '50mb', extended: true })); // For form data
 app.use(cookieparser());
 app.use(cors({
-    origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173" , "https://start-with-ai-interview.vercel.app"], // Specific origins when using credentials
+    origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173" , "https://start-with-ai-interview.vercel.app" , 'https://interview.startwith.live'], // Specific origins when using credentials
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "Cookie"],
@@ -26,7 +26,7 @@ dotenv.config({
 
 // Handle preflight requests for all routes including Socket.IO
 app.use((req, res, next) => {
-    const allowedOrigins = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173" , "https://start-with-ai-interview.vercel.app"];
+    const allowedOrigins = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173" , "https://start-with-ai-interview.vercel.app" , 'https://interview.startwith.live'];
     const origin = req.headers.origin;
     
     // Only set origin header if it's in our allowed list

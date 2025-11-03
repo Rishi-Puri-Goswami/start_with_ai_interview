@@ -1,7 +1,5 @@
 const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api/deepgram-tts`;
 
-
-
 class SimpleVoiceRecorder {
     constructor() {
         this.mediaRecorder = null;
@@ -33,6 +31,7 @@ class SimpleVoiceRecorder {
     }
 
 
+    
     
     async initialize() {
         try {
