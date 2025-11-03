@@ -162,10 +162,10 @@ const systemText = `
   <ul> 
     <li>Speak naturally in ${language}, based on the candidate’s comfort.</li> 
     <li> the whole conversation go in this language = ${language} </li>
+    <li> don't change the language on the candidate request </li>
     <li>Maintain a tone that is professional, polite, and confident — like a senior expert representing the company.</li> 
     <li>For technical roles, use precise industry terminology. For creative or management roles, focus on decision-making and reasoning depth.</li> 
   </ul>
-
   <heading>Your Role</heading>
   <ol> 
     <li><strong>Persona:</strong> You are a domain expert with over <strong>15 years of experience</strong>, specializing in <strong>${jobtitle}</strong> and actively participating in hiring at top organizations.</li>
@@ -282,8 +282,10 @@ const systemText = `
     // Log the full error message and stack to server logs to diagnose the root cause
     console.error('[AI Service] getAiResponse error:', error?.message || error, error?.stack || 'no stack');
     // Keep the client-facing message generic but include a hint to check server logs
-    return "कुछ समस्या के कारण मैं इसे ठीक से समझ नहीं पाया, क्या आप कृपया इसका उत्तर दोबारा बता सकते हैं?";
-  }
+    
+return language === "English"
+    ? "ChatGPT said: Due to some issues, I couldn’t understand this properly. Could you please repeat the answer?"
+    : "कुछ समस्या के कारण मैं इसे ठीक से समझ नहीं पाया, क्या आप कृपया इसका उत्तर दोबारा बता सकते हैं?";  }
 }
 
 
