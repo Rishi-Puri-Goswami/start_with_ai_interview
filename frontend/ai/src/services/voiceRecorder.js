@@ -31,8 +31,6 @@ class SimpleVoiceRecorder {
     }
 
 
-    
-    
     async initialize() {
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({ 
