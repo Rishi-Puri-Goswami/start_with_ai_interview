@@ -12,6 +12,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@react-oauth/google": "^0.12.2",
+    "@ricky0123/vad-web": "^0.0.29",
     "axios": "^1.12.2",
     "imagekit-javascript": "^4.0.1",
     "imagekitio-react": "^4.3.0",

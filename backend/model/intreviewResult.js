@@ -59,3 +59,6 @@ const IntreviewSchema = new Schema({
 
 
 export const IntreviewResult = mongoose.model("IntreviewResult" , IntreviewSchema);
+
+
+

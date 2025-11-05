@@ -4,7 +4,8 @@ import { SarvamAIClient } from 'sarvamai';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-
+// const WebSocket = require('ws'); 
+import WebSocket from "ws";
 const router = express.Router();
 
 // Use environment variable for API keys
@@ -149,7 +150,7 @@ router.options("/transcribe", (req, res) => {
   res.sendStatus(200);
 });
 
-// Speech-to-Text endpoint using SarvamAI job-based STT
+
 router.post("/transcribe", async (req, res) => {
   try {
     // Add CORS headers - specific origin instead of wildcard for credentials
@@ -160,23 +161,18 @@ router.post("/transcribe", async (req, res) => {
     }
     res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-
     console.log('🎙️ Starting speech transcription (Sarvam)...');
-
     // Check if audio data is provided
     if (!req.body.audio) {
       return res.status(400).json({ success: false, error: 'Audio data is required' });
     }
-
     let { audio, format = 'webm', language , numSpeakers = 1 } = req.body;
     console.log('🔍 Audio format:', format);
-
     // If the client sent a data: URI (data:audio/webm;base64,AAA...), strip the prefix
     if (typeof audio === 'string' && audio.startsWith('data:')) {
       const idx = audio.indexOf(',');
       if (idx !== -1) audio = audio.slice(idx + 1);
     }
-
     // Convert base64 audio to buffer with validation
     let audioBuffer;
     try {
@@ -194,133 +190,117 @@ router.post("/transcribe", async (req, res) => {
       console.error('❌ Failed to decode base64 audio:', decodeErr?.message || decodeErr);
       return res.status(400).json({ success: false, error: 'Invalid base64 audio data', details: decodeErr?.message || String(decodeErr) });
     }
-
     console.log('🎵 Processing audio buffer, size:', audioBuffer.length, 'bytes');
-
     if (!audioBuffer || audioBuffer.length < 100) {
       console.log('⚠️ Audio buffer too small or might be empty');
       return res.status(400).json({ success: false, error: 'Audio data too small or empty' });
     }
-
-  // Prepare temporary paths (write file only as fallback)
-  const tmpDir = path.join(os.tmpdir(), 'sarvam_stt');
-  await fs.promises.mkdir(tmpDir, { recursive: true });
-  const ext = format === 'webm' ? 'webm' : (format === 'wav' ? 'wav' : (format === 'mp3' ? 'mp3' : 'wav'));
-  const tmpFile = path.join(tmpDir, `upload-${Date.now()}.${ext}`);
-
-    // Initialize Sarvam client (read API key from environment)
-    const sarvamApiKey = process.env.SARVAM_API || null;
-    if (!sarvamApiKey) {
-      console.error('❌ SARVAM_API_KEY not configured in environment');
-      return res.status(500).json({ success: false, error: 'Server missing SARVAM_API_KEY environment variable' });
-    }
-    const client = new SarvamAIClient({ apiSubscriptionKey: sarvamApiKey });
-
-
-const languagecode  = language === "English" ? "en-IN" : "hi-IN";
-
-
-    // Create a Sarvam STT job
-    // Opt for faster defaults: disable timestamps and diarization unless explicitly requested.
-    const preferFast = !!req.body.fast || process.env.SARVAM_STT_PREFER_FAST === '1';
-    const jobOptions = {
-      languageCode: languagecode ,
-      model: preferFast ? (process.env.SARVAM_STT_FAST_MODEL || process.env.SARVAM_STT_MODEL || 'saarika:v2') : (process.env.SARVAM_STT_MODEL || 'saarika:v2.5'),
-      withTimestamps: !!req.body.timestamps || false,
-      withDiarization: !!req.body.diarization || false,
-      numSpeakers: Number(numSpeakers) || 1
-    };
-
-    
-    console.log('🛠️ Creating Sarvam STT job with options:', jobOptions);
-    const job = await client.speechToTextJob.createJob(jobOptions);
-
-    // Try to upload directly from buffer (avoid disk I/O). If SDK accepts an array of
-    // in-memory file objects, prefer that. Fall back to temp-file upload if not supported.
-    let usedTmpFile = false;
-    try {
-      // attempt in-memory upload; SDK implementations vary, try common shapes
-      await job.uploadFiles([{ fileName: `audio.${ext}`, buffer: audioBuffer }]);
-      console.log('📤 Uploaded audio buffer directly to Sarvam (in-memory)');
-    } catch (memErr) {
-      try {
-        // Some SDK accept { name, data } shape
-        await job.uploadFiles([{ name: `audio.${ext}`, data: audioBuffer }]);
-        console.log('📤 Uploaded audio buffer directly (alternate shape)');
-      } catch (memErr2) {
-        // Fallback: write temp file and upload by path
-        await fs.promises.writeFile(tmpFile, audioBuffer);
-        usedTmpFile = true;
-        await job.uploadFiles([tmpFile]);
-        console.log('📤 Uploaded audio via temporary file:', tmpFile);
-      }
-    }
-
-    // Start job and wait until complete
-    await job.start();
-    const finalStatus = await job.waitUntilComplete();
-
-    if (await job.isFailed()) {
-      console.error('❌ Sarvam STT job failed');
-      return res.status(500).json({ success: false, error: 'Sarvam STT job failed' });
-    }
-
-  // Download outputs to a temporary output folder
-  const outputDir = path.join(tmpDir, `output-${Date.now()}`);
-  await fs.promises.mkdir(outputDir, { recursive: true });
-  await job.downloadOutputs(outputDir);
-
-    // Try to find a transcript file in the outputs
-    const outFiles = await fs.promises.readdir(outputDir);
-    let transcript = '';
-    let rawJson = null;
-    for (const f of outFiles) {
-      const lower = f.toLowerCase();
-      const p = path.join(outputDir, f);
-      if (lower.endsWith('.txt')) {
-        transcript = await fs.promises.readFile(p, 'utf8');
-        break;
-      }
-      if (lower.endsWith('.json')) {
-        try {
-          const j = JSON.parse(await fs.promises.readFile(p, 'utf8'));
-          rawJson = j;
-          // Try common transcript fields
-          transcript = j.text || j.transcript || j.results?.[0]?.text || j.data?.text || '';
-          if (transcript) break;
-        } catch (e) {
-          // ignore parse error
-        }
-      }
-    }
-
-    // Fallback: if no transcript found but job has a result object, return that
-    if (!transcript && rawJson) transcript = JSON.stringify(rawJson);
-
-    console.log('✅ Sarvam STT completed; transcript length:', transcript ? transcript.length : 0);
-    // Clean up temp files if created
-    try {
-      if (usedTmpFile && tmpFile) await fs.promises.unlink(tmpFile).catch(() => {});
-      // optionally remove outputDir contents after reading
-      // keep outputs for debugging if env DEBUG_SARVAM_OUTPUT=1
-      if (process.env.DEBUG_SARVAM_OUTPUT !== '1') {
-        const filesToRemove = await fs.promises.readdir(outputDir).catch(() => []);
-        for (const f of filesToRemove) {
-          await fs.promises.unlink(path.join(outputDir, f)).catch(() => {});
-        }
-        await fs.promises.rmdir(outputDir).catch(() => {});
-      }
-    } catch (_) {}
-
-    return res.json({ success: true, transcript: transcript || '', audioLength: audioBuffer.length, files: outFiles, message: 'Speech transcribed successfully (Sarvam)' });
-
-  } catch (error) {
-    console.error('❌ Sarvam STT endpoint error:', error);
-    res.status(500).json({ success: false, error: error.message || String(error) });
-  }
+   // Prepare temporary paths (write file only as fallback)
+   const tmpDir = path.join(os.tmpdir(), 'sarvam_stt');
+   await fs.promises.mkdir(tmpDir, { recursive: true });
+   const ext = format === 'webm' ? 'webm' : (format === 'wav' ? 'wav' : (format === 'mp3' ? 'mp3' : 'wav'));
+   const tmpFile = path.join(tmpDir, `upload-${Date.now()}.${ext}`);
+     // Initialize Sarvam client (read API key from environment)
+     const sarvamApiKey = process.env.SARVAM_API || null;
+     if (!sarvamApiKey) {
+       console.error('❌ SARVAM_API_KEY not configured in environment');
+       return res.status(500).json({ success: false, error: 'Server missing SARVAM_API_KEY environment variable' });
+     }
+     const client = new SarvamAIClient({ apiSubscriptionKey: sarvamApiKey });
+  const languagecode  = language === "English" ? "en-IN" : "hi-IN";
+     // Create a Sarvam STT job
+     // Opt for faster defaults: disable timestamps and diarization unless explicitly requested.
+     const preferFast = !!req.body.fast || process.env.SARVAM_STT_PREFER_FAST === '1';
+     const jobOptions = {
+       languageCode: languagecode ,
+       model: preferFast ? (process.env.SARVAM_STT_FAST_MODEL || process.env.SARVAM_STT_MODEL || 'saarika:v2') : (process.env.SARVAM_STT_MODEL || 'saarika:v2.5'),
+       withTimestamps: !!req.body.timestamps || false,
+       withDiarization: !!req.body.diarization || false,
+       numSpeakers: Number(numSpeakers) || 1
+     };
+     
+     console.log('🛠️ Creating Sarvam STT job with options:', jobOptions);
+     const job = await client.speechToTextJob.createJob(jobOptions);
+     // Try to upload directly from buffer (avoid disk I/O). If SDK accepts an array of
+     // in-memory file objects, prefer that. Fall back to temp-file upload if not supported.
+     let usedTmpFile = false;
+     try {
+       // attempt in-memory upload; SDK implementations vary, try common shapes
+       await job.uploadFiles([{ fileName: `audio.${ext}`, buffer: audioBuffer }]);
+       console.log('📤 Uploaded audio buffer directly to Sarvam (in-memory)');
+     } catch (memErr) {
+       try {
+         // Some SDK accept { name, data } shape
+         await job.uploadFiles([{ name: `audio.${ext}`, data: audioBuffer }]);
+         console.log('📤 Uploaded audio buffer directly (alternate shape)');
+       } catch (memErr2) {
+         // Fallback: write temp file and upload by path
+         await fs.promises.writeFile(tmpFile, audioBuffer);
+         usedTmpFile = true;
+         await job.uploadFiles([tmpFile]);
+         console.log('📤 Uploaded audio via temporary file:', tmpFile);
+       }
+     }
+     // Start job and wait until complete
+     await job.start();
+     const finalStatus = await job.waitUntilComplete();
+     if (await job.isFailed()) {
+       console.error('❌ Sarvam STT job failed');
+       return res.status(500).json({ success: false, error: 'Sarvam STT job failed' });
+     }
+   // Download outputs to a temporary output folder
+   const outputDir = path.join(tmpDir, `output-${Date.now()}`);
+   await fs.promises.mkdir(outputDir, { recursive: true });
+   await job.downloadOutputs(outputDir);
+     // Try to find a transcript file in the outputs
+     const outFiles = await fs.promises.readdir(outputDir);
+     let transcript = '';
+     let rawJson = null;
+     for (const f of outFiles) {
+       const lower = f.toLowerCase();
+       const p = path.join(outputDir, f);
+       if (lower.endsWith('.txt')) {
+         transcript = await fs.promises.readFile(p, 'utf8');
+         break;
+       }
+       if (lower.endsWith('.json')) {
+         try {
+           const j = JSON.parse(await fs.promises.readFile(p, 'utf8'));
+           rawJson = j;
+           // Try common transcript fields
+           transcript = j.text || j.transcript || j.results?.[0]?.text || j.data?.text || '';
+           if (transcript) break;
+         } catch (e) {
+           // ignore parse error
+         }
+       }
+     }
+     // Fallback: if no transcript found but job has a result object, return that
+     if (!transcript && rawJson) transcript = JSON.stringify(rawJson);
+     console.log('✅ Sarvam STT completed; transcript length:', transcript ? transcript.length : 0);
+     // Clean up temp files if created
+     try {
+       if (usedTmpFile && tmpFile) await fs.promises.unlink(tmpFile).catch(() => {});
+       // optionally remove outputDir contents after reading
+       // keep outputs for debugging if env DEBUG_SARVAM_OUTPUT=1
+       if (process.env.DEBUG_SARVAM_OUTPUT !== '1') {
+         const filesToRemove = await fs.promises.readdir(outputDir).catch(() => []);
+         for (const f of filesToRemove) {
+           await fs.promises.unlink(path.join(outputDir, f)).catch(() => {});
+         }
+         await fs.promises.rmdir(outputDir).catch(() => {});
+       }
+     } catch (_) {}
+     return res.json({ success: true, transcript: transcript || '', audioLength: audioBuffer.length, files: outFiles, message: 'Speech transcribed successfully (Sarvam)' });
+   } catch (error) {
+     console.error('❌ Sarvam STT endpoint error:', error);
+     res.status(500).json({ success: false, error: error.message || String(error) });
+   }
 });
 
-// Get available Deepgram voices
+
+
+
 router.get("/voices", (req, res) => {
   try {
     // Server-side voice listing not configured. Prefer browser voices or configure Sarvam voices.
@@ -335,5 +315,8 @@ router.get("/voices", (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
+
 
 export default router;

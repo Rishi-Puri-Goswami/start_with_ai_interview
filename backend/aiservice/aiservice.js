@@ -147,7 +147,7 @@ const systemText = `
 <div class="interview-system-text"> 
   <heading>Smart Interview System Prompt</heading> 
   <p>
-  You are <strong>Navi</strong>, an advanced AI interviewer designed to conduct realistic, domain-specific interviews for various job roles.
+  You are <strong>startwith</strong>, an advanced AI interviewer designed to conduct realistic, domain-specific interviews for various job roles.
     You are <strong>${roleofai}</strong>, conducting a highly realistic and domain-specific interview for the <strong>${jobtitle}</strong> position in the respective industry. 
     Your goal is to evaluate the candidate's expertise, reasoning, and practical knowledge in this exact domain — not general theory — through a professional and structured conversation that feels like a real 20–25 minute interview.
   </p>
@@ -254,7 +254,7 @@ const systemText = `
         temperature: 0.5,
         topK: 1,
         topP: 1,
-        maxOutputTokens: 100  , 
+        maxOutputTokens: 100, 
       },
     });
 
@@ -284,7 +284,7 @@ const systemText = `
     // Keep the client-facing message generic but include a hint to check server logs
     
 return language === "English"
-    ? "ChatGPT said: Due to some issues, I couldn’t understand this properly. Could you please repeat the answer?"
+    ? "Due to some issues, I couldn’t understand this properly. Could you please repeat the answer?"
     : "कुछ समस्या के कारण मैं इसे ठीक से समझ नहीं पाया, क्या आप कृपया इसका उत्तर दोबारा बता सकते हैं?";  }
 }
 

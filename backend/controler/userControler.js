@@ -57,6 +57,27 @@ const loginusergoogle = async (req, res) => {
 
         
 
+        
+
+
+        // const finduser = await Candidate.findOne({ email });
+
+        if (find_candidate) {
+
+
+            if (find_candidate.numberofattempt >= 1) {
+                return res.status(403).json({ message: "you have exceeded the number of attempts", status: 403 });
+            }
+
+
+            find_candidate.numberofattempt += 1;
+
+            find_candidate.save();
+            const token = jwt.sign({ _id: find_candidate._id }, process.env.JWT_SERECT_KEY, { expiresIn: '1d' })
+
+
+
+            
         const createintreview = await IntreviewResult.create({
             userid : find_candidate._id,
             resumeText: find_candidate.resumeSummary || "",
@@ -82,21 +103,6 @@ const loginusergoogle = async (req, res) => {
 
         
 
-
-        // const finduser = await Candidate.findOne({ email });
-
-        if (find_candidate) {
-
-
-            if (find_candidate.numberofattempt >= 1) {
-                return res.status(403).json({ message: "you have exceeded the number of attempts", status: 403 });
-            }
-
-
-            find_candidate.numberofattempt += 1;
-
-            find_candidate.save();
-            const token = jwt.sign({ _id: find_candidate._id }, process.env.JWT_SERECT_KEY, { expiresIn: '1d' })
 
 
             if (!token) {
@@ -163,6 +169,9 @@ const loginusergoogle = async (req, res) => {
 
         //     return res.status(200).json({ message: "user successfull login", token, status: 200 });
         // }
+
+
+        
 
     } catch (error) {
         console.log("error on loging user", error);
