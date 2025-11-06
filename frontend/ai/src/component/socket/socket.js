@@ -12,7 +12,7 @@ function createSocket(tokenFromStorage) {
         withCredentials: true,
         auth: { token: tokenFromStorage || null },
         // allow polling fallback for environments where websocket handshake fails
-        transports: ['websocket'],
+        transports: ['polling', 'websocket'],
         autoConnect: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000
