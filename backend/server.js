@@ -9,6 +9,17 @@ import {connect} from "./redis/redis.js";
 
 const httpServer = http.createServer(app);
 
+// Lightweight upgrade logger to help debug WS handshake issues (non-destructive)
+httpServer.on('upgrade', (request, socket, head) => {
+    try {
+        const pathname = request.url || '';
+        const origin = request.headers.origin || '';
+        console.log('HTTP upgrade request:', { pathname, origin, remote: socket.remoteAddress || '<unk>' });
+    } catch (e) {
+        console.warn('Upgrade log error', e);
+    }
+});
+
 initSocketServer(httpServer);
 
 

@@ -8,11 +8,14 @@ function createSocket(tokenFromStorage) {
     // If already created, return it
     if (socket) return socket;
 
-    socket = io(`https://startwithaiinterview-production.up.railway.app`, {
+    socket = io(`${import.meta.env.VITE_API_URL}`, {
         withCredentials: true,
         auth: { token: tokenFromStorage || null },
+        // allow polling fallback for environments where websocket handshake fails
         transports: ['websocket'],
-        autoConnect: true
+        autoConnect: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
     });
 
     socket.on('connect', () => {

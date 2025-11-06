@@ -1,14 +1,13 @@
 import { Server } from 'socket.io';
-import cookie from 'cookie';
+import cookie from 'cookie';``
 import jwt from 'jsonwebtoken';
+import WebSocket from 'ws';
 import { Interview } from '../model/intreview.js';
 import { client } from '../redis/redis.js';
 import { IntreviewResult } from '../model/intreviewResult.js';
 import mongoose from 'mongoose';
 import {Candidate} from '../model/usermodel.js';
 import { json } from 'express';
-
-
 
 
 export function initSocket(server, opts = {}) {
@@ -114,6 +113,7 @@ console.log(token);
   });
 
 
+  
 
 
 
@@ -126,6 +126,273 @@ console.log(token);
     if (socket.user && socket.user._id) {
       socket.join(String(socket.user._id));
     }
+
+
+
+
+
+
+
+    // ---------- Sarvam realtime STT integration ----------
+let sarvamWS = null;
+let sarvamAccumulatedTranscript = ''; // accumulate confirmed/returned text
+let sarvamSessionOpen = false;
+let sarvamFlushPending = false;
+let sarvamCloseTimeout = null;
+
+const SARVAM_KEY = "sk_2udpa4kp_LHM7SG4tvNt8BN1lUxxrX0Cd";
+if (!SARVAM_KEY) {
+  console.warn('⚠️ SARVAM_API_KEY not set in environment. Set process.env.SARVAM_API_KEY');
+}
+
+// Helper to safe-emit back to socket
+function emitToClient(event, payload) {
+  try {
+    socket.emit(event, payload);
+  } catch (e) {
+    console.warn('emitToClient failed', e);
+  }
+}
+
+// Start a new Sarvam STT session for this socket
+socket.on('start-sarvam-stt', (opts = {}) => {
+  // if already opened, ignore / reuse existing
+  if (sarvamWS && sarvamWS.readyState === WebSocket.OPEN) {
+    console.log('Sarvam WS already open for this socket');
+    return;
+  }
+
+  // Build query params per Sarvam asyncAPI
+  const languageCode = (opts.languageCode || 'en-IN');
+  const model = (opts.model || 'saarika:v2.5');
+  const input_audio_codec = (opts.input_audio_codec || 'pcm_s16le'); // we send pcm_s16le
+  const sample_rate = (opts.sample_rate || '16000');
+  const vad_signals = (opts.vad_signals === undefined) ? 'false' : String(opts.vad_signals);
+  const high_vad_sensitivity = (opts.high_vad_sensitivity === undefined) ? 'false' : String(opts.high_vad_sensitivity);
+  const flush_signal = 'true'; // allow flush signal
+
+  const qs = `?language-code=${encodeURIComponent(languageCode)}&model=${encodeURIComponent(model)}&input_audio_codec=${encodeURIComponent(input_audio_codec)}&sample_rate=${encodeURIComponent(sample_rate)}&vad_signals=${encodeURIComponent(vad_signals)}&high_vad_sensitivity=${encodeURIComponent(high_vad_sensitivity)}&flush_signal=${encodeURIComponent(flush_signal)}`;
+
+  const sarvamUrl = `wss://api.sarvam.ai/speech-to-text/ws${qs}`;
+
+  console.log('🌐 Opening Sarvam WS', sarvamUrl);
+
+  // Create new websocket to Sarvam with Api-Subscription-Key header (per doc)
+  sarvamWS = new WebSocket(sarvamUrl, {
+    headers: {
+      'Api-Subscription-Key': SARVAM_KEY
+    }
+  });
+
+  sarvamAccumulatedTranscript = '';
+  sarvamSessionOpen = false;
+  sarvamFlushPending = false;
+
+  sarvamWS.on('open', () => {
+    console.log('✅ Sarvam STT websocket opened for socket', socket.id);
+    sarvamSessionOpen = true;
+    emitToClient('sarvam-ready', { ok: true });
+  });
+
+  sarvamWS.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch (err) {
+      // If Sarvam ever sends raw text or binary, just log it
+      console.warn('Non-JSON message from Sarvam:', raw.toString());
+      return;
+    }
+
+    // According to your AsyncAPI: message object has "type" and "data"
+    // type: 'data' | 'error' | 'events'
+    // data: either transcription data (with transcript) or error or events (START_SPEECH/END_SPEECH)
+    const msgType = msg.type;
+    const data = msg.data;
+
+    if (!msgType || !data) {
+      // If the provider returns a different schema, we try to be robust
+      // Try to detect a direct transcript field
+      if (msg.transcript) {
+        // fallback: emit as interim
+        emitToClient('sarvam-transcript-interim', { text: msg.transcript });
+      }
+      return;
+    }
+
+    if (msgType === 'error') {
+      console.error('Sarvam error:', data);
+      emitToClient('sarvam-error', data);
+      return;
+    }
+
+    if (msgType === 'events') {
+      // events have event_type, timestamp, signal_type, occured_at
+      // signal_type could be START_SPEECH or END_SPEECH
+      emitToClient('sarvam-event', data);
+
+      if (data.signal_type === 'END_SPEECH') {
+        // When Sarvam signals END_SPEECH, treat accumulated transcript as final for this segment
+        const finalText = sarvamAccumulatedTranscript.trim();
+        if (finalText) {
+          emitToClient('sarvam-transcript-final', { text: finalText });
+        }
+        // Reset accumulation for next speech
+        sarvamAccumulatedTranscript = '';
+        // If we previously sent a flush and are waiting to close, close now
+        if (sarvamFlushPending) {
+          try {
+            sarvamWS.close();
+          } catch {}
+        }
+      }
+
+      return;
+    }
+
+    if (msgType === 'data') {
+      // Data should be a transcription object (SpeechToTextTranscriptionData)
+      // it contains request_id, transcript, metrics, maybe timestamps/diarized_transcript
+      // Append transcript to accumulator and emit interim
+      const transcriptText = (data && data.transcript) ? String(data.transcript).trim() : '';
+      if (transcriptText) {
+        // append with space to maintain readability
+        sarvamAccumulatedTranscript = (sarvamAccumulatedTranscript + ' ' + transcriptText).trim();
+
+        // Emit interim so UI can show streaming text
+        emitToClient('sarvam-transcript-interim', {
+          text: transcriptText,
+          request_id: data.request_id || null,
+          metrics: data.metrics || null
+        });
+      } else {
+        // Might be other data shape; pass upstream
+        emitToClient('sarvam-data', data);
+      }
+      return;
+    }
+
+    // Unknown type, pass upstream
+    emitToClient('sarvam-raw', msg);
+  });
+
+  sarvamWS.on('close', (code, reason) => {
+    console.log('⛔ Sarvam WS closed', code, reason && reason.toString());
+    sarvamSessionOpen = false;
+    // When server closes, try to emit any remaining accumulated transcript as final
+    const finalText = sarvamAccumulatedTranscript.trim();
+    if (finalText) {
+      emitToClient('sarvam-transcript-final', { text: finalText });
+      sarvamAccumulatedTranscript = '';
+    }
+    emitToClient('sarvam-closed', { code, reason: reason && reason.toString() });
+    // cleanup
+    if (sarvamCloseTimeout) {
+      clearTimeout(sarvamCloseTimeout);
+      sarvamCloseTimeout = null;
+    }
+  });
+
+  sarvamWS.on('error', (err) => {
+    console.error('Sarvam WS error:', err && (err.message || err));
+    emitToClient('sarvam-error', { error: err && err.message ? err.message : String(err) });
+  });
+});
+
+// Receive audio chunk from frontend and forward to Sarvam
+socket.on('audio-chunk', (chunk) => {
+  // chunk can be Buffer, Uint8Array or ArrayBuffer or object depending on client
+  if (!sarvamWS || sarvamWS.readyState !== WebSocket.OPEN) {
+    console.warn('audio-chunk received but sarvamWS not open');
+    return;
+  }
+
+  // Normalize to Buffer
+  let buf;
+  try {
+    if (Buffer.isBuffer(chunk)) buf = chunk;
+    else if (chunk instanceof ArrayBuffer) buf = Buffer.from(chunk);
+    else if (ArrayBuffer.isView(chunk)) buf = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    else if (typeof chunk === 'object' && chunk.data) {
+      // sometimes socket.io wraps binary in { data: ... }
+      const incoming = chunk.data;
+      if (Buffer.isBuffer(incoming)) buf = incoming;
+      else if (incoming instanceof ArrayBuffer) buf = Buffer.from(incoming);
+      else if (ArrayBuffer.isView(incoming)) buf = Buffer.from(incoming.buffer, incoming.byteOffset, incoming.byteLength);
+      else buf = Buffer.from(incoming);
+    } else {
+      // fallback: try Buffer.from
+      buf = Buffer.from(chunk);
+    }
+  } catch (err) {
+    console.error('Failed to normalize audio chunk to Buffer', err);
+    return;
+  }
+
+  // Convert to base64 (Sarvam expects base64 inside JSON audio.data)
+  const base64 = buf.toString('base64');
+
+  // Build the audio message per Sarvam AsyncAPI schema
+  const audioMessage = {
+    audio: {
+      data: base64,
+      sample_rate: '16000',
+      encoding: 'audio/wav',         // keeping audio/wav per schema; Sarvam accepts pcm_s16le as input_audio_codec
+      input_audio_codec: 'pcm_s16le' // we send raw PCM signed 16-bit little-endian
+    }
+  };
+
+  try {
+    sarvamWS.send(JSON.stringify(audioMessage));
+  } catch (err) {
+    console.error('Failed to send audio chunk to Sarvam WS', err);
+  }
+});
+
+// Stop / flush the Sarvam session and request final transcript
+socket.on('stop-sarvam-stt', () => {
+  if (!sarvamWS || sarvamWS.readyState !== WebSocket.OPEN) {
+    console.log('stop-sarvam-stt but sarvamWS not open');
+    // still emit final if any accumulated
+    const finalText = (sarvamAccumulatedTranscript || '').trim();
+    if (finalText) emitToClient('sarvam-transcript-final', { text: finalText });
+    sarvamAccumulatedTranscript = '';
+    return;
+  }
+
+  // Send flush signal as described in the AsyncAPI (type: 'flush')
+  try {
+    sarvamFlushPending = true;
+    sarvamWS.send(JSON.stringify({ type: 'flush' }));
+    // After sending flush, give Sarvam a short window (e.g. 3s) to respond with final events/data
+    if (sarvamCloseTimeout) clearTimeout(sarvamCloseTimeout);
+    sarvamCloseTimeout = setTimeout(() => {
+      try {
+        if (sarvamWS && sarvamWS.readyState === WebSocket.OPEN) {
+          sarvamWS.close();
+        }
+      } catch {}
+    }, 3000); // adjust if you want to wait longer
+  } catch (err) {
+    console.error('Failed to send flush to Sarvam WS', err);
+    // fallback: close connection
+    try { sarvamWS.close(); } catch {}
+  }
+});
+
+// Cleanup on disconnect
+socket.on('disconnect', () => {
+  if (sarvamWS && sarvamWS.readyState === WebSocket.OPEN) {
+    try { sarvamWS.close(); } catch (e) {}
+  }
+  if (sarvamCloseTimeout) {
+    clearTimeout(sarvamCloseTimeout);
+    sarvamCloseTimeout = null;
+  }
+});
+
+
+
 
 
 
@@ -453,6 +720,7 @@ console.log("updating interview", intreviewid);
 
   return io;
 }
+
 
 export default initSocket;
 

@@ -295,11 +295,78 @@ if(sessionId && blob && blob.size > 0){
     socket.on("ai-response", handleAiResponse);
     socket.on("error", handleError);
     socket.on("final-feedback", handleFinalFeedback);
+    // When the Sarvam streaming backend emits a final transcript, treat it as the user's finished utterance:
+    const handleSarvamFinal = (payload) => {
+      let raw = '';
+      if (payload == null) raw = '';
+      else if (typeof payload === 'string') raw = payload;
+      else raw = payload.text ?? payload.transcript ?? '';
+
+      const text = raw.toString().trim();
+      if (!text) {
+        console.log('sarvam-transcript-final received empty text, ignoring');
+        return;
+      }
+      console.log('✅ FINAL (sarvam):', text);
+
+      // Stop listening so we don't collect additional audio while AI processes
+      if (voiceRecorder) {
+        try { voiceRecorder.stopListening(); } catch (e) { console.warn('stopListening failed', e); }
+      }
+
+      // Show the user's message in the chat and send to AI
+      setMessages((prev) => [...prev, { sender: 'user', text }]);
+      setActiveSpeaker('ai');
+
+      if (sessionId) {
+        socket.emit('user-message', { sessionId, messageContent: text });
+        console.log('Emitted user-message (from sarvam final):', { sessionId, messageContent: text });
+      } else {
+        console.warn('No sessionId available for sarvam-transcript-final');
+      }
+    };
+
+    socket.on('sarvam-transcript-final', handleSarvamFinal);
+
+    
+
+// const handleSarvamFinal = (payload) => {
+//   let raw = '';
+//   if (payload == null) raw = '';
+//   else if (typeof payload === 'string') raw = payload;
+//   else raw = payload.text ?? payload.transcript ?? '';
+//   const text = raw.toString().trim();
+//   if (!text) return;
+
+//   console.log('FINAL (sarvam):', text);
+
+//   // 1. STOP MIC
+//   voiceRecorder?.stopListening();
+
+//   // 2. SHOW USER BUBBLE + SEND TO AI
+//   setMessages(prev => [...prev, { sender: 'user', text }]);
+//   setActiveSpeaker('ai');
+//   if (sessionId) {
+//     socket.emit('user-message', { sessionId, messageContent: text });
+//   }
+
+//   // 3. RE-START MIC AFTER 250ms → ZERO dead-air
+//   setTimeout(() => {
+//     if (voiceRecorder && !voiceRecorder.isListening) {
+//       voiceRecorder.startListening();
+//       console.log('Mic RE-ENABLED – ready for next turn');
+//     }
+//   }, 250);
+// };
+
+// socket.on('sarvam-transcript-final', handleSarvamFinal);
+// console.log("Registered sarvam-transcript-final handler" , handleSarvamFinal);
 
     return () => {
       socket.off("ai-response", handleAiResponse);
       socket.off("error", handleError);
       socket.off("final-feedback", handleFinalFeedback);
+      socket.off('sarvam-transcript-final', handleSarvamFinal);
     };
   }, [sessionId, voiceRecorder, isInterviewActive, stopInterview]);
 
@@ -529,6 +596,7 @@ if(sessionId && blob && blob.size > 0){
           sessionId,
           messageContent: transcript
         };
+
         socket.emit("user-message", messageData);
         console.log("Sent user-message:", messageData);
 
