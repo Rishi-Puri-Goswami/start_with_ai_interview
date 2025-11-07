@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Video, VideoOff, Mic, MicOff, Play, Square, Send } from 'lucide-react';
 import socket from "./socket/socket";
 import { useParams, useNavigate } from "react-router-dom";
-import { textToSpeech } from "../services/deepgramTTS";
+import { textToSpeech, getAudioMixingContext } from "../services/deepgramTTS";
 import { SimpleVoiceRecorder } from "../services/voiceRecorder"; 
 import ImageKit from 'imagekit-javascript';
 
@@ -100,12 +100,28 @@ const language = interviewDetails.launguage ;
     }
   }, []);
 
-
-
-
-
-
   const stopInterview = async () => {
+    console.log('🛑 Stopping interview - cleaning up all resources...');
+    
+    // First, stop the voice recorder immediately to prevent any new audio capture
+    if (voiceRecorder) {
+      console.log('🎤 Stopping voice recorder...');
+      try { 
+        voiceRecorder.stopListening(); 
+        console.log('✅ Voice recorder stopped');
+      } catch(e) {
+        console.warn('⚠️ Error stopping voice recorder:', e);
+      }
+      try { 
+        voiceRecorder.cleanup(); 
+        console.log('✅ Voice recorder cleaned up');
+      } catch(e) {
+        console.warn('⚠️ Error cleaning up voice recorder:', e);
+      }
+      setVoiceRecorder(null);
+    }
+
+    // Stop media recorder
     if (mediaRecorderRef.current && isRecording) {
       const recorder = mediaRecorderRef.current;
       await new Promise((resolve) => {
@@ -125,19 +141,25 @@ const language = interviewDetails.launguage ;
       setIsRecording(false);
     }
 
+    // Stop all media tracks (camera/microphone)
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach(track => {
+        track.stop();
+        console.log(`✅ Stopped ${track.kind} track`);
+      });
       setStream(null);
     }
 
-    if (voiceRecorder) {
-      try { voiceRecorder.stopListening(); } catch(e){}
-      try { voiceRecorder.cleanup(); } catch(e){}
-      setVoiceRecorder(null);
-    }
-
     setIsInterviewActive(false);
-  setActiveSpeaker('none');
+    setActiveSpeaker('none');
+
+    // Ensure Sarvam STT session is closed on the backend
+    try {
+      socket.emit('stop-sarvam-stt');
+      console.log('✅ Sent stop-sarvam-stt to backend');
+    } catch(e) {
+      console.warn('⚠️ Error emitting stop-sarvam-stt:', e);
+    }
 
     if ((!finalVideoBlob || finalVideoBlob.size === 0) && chunksRef.current && chunksRef.current.length > 0) {
       try {
@@ -328,7 +350,7 @@ if(sessionId && blob && blob.size > 0){
 
     socket.on('sarvam-transcript-final', handleSarvamFinal);
 
-    
+
 
 // const handleSarvamFinal = (payload) => {
 //   let raw = '';
@@ -548,14 +570,33 @@ if(sessionId && blob && blob.size > 0){
     }
 
     try {
+      // Get video and audio from the user's camera/microphone
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: true
       });
+      
+      // Get the audio mixing context to combine microphone + AI audio
+      const { audioContext, destination } = getAudioMixingContext();
+      
+      // Create a source from the microphone audio track
+      const micAudioTrack = mediaStream.getAudioTracks()[0];
+      const micStream = new MediaStream([micAudioTrack]);
+      const micSource = audioContext.createMediaStreamSource(micStream);
+      
+      // Connect microphone to the destination (AI audio is already connected in deepgramTTS.js)
+      micSource.connect(destination);
+      
+      // Create a combined stream with video + mixed audio (mic + AI)
+      const videoTrack = mediaStream.getVideoTracks()[0];
+      const mixedAudioTrack = destination.stream.getAudioTracks()[0];
+      const combinedStream = new MediaStream([videoTrack, mixedAudioTrack]);
+      
       setStream(mediaStream);
       if (videoRef.current) videoRef.current.srcObject = mediaStream;
 
-      const mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'video/webm' });
+      // Use the combined stream for recording (includes both mic and AI audio)
+      const mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
       mediaRecorderRef.current = mediaRecorder;
 
       chunksRef.current = [];
@@ -701,6 +742,7 @@ if(sessionId && blob && blob.size > 0){
   };
 
   return (
+
    <div class="min-h-screen bg-gray-950 text-gray-200 p-6 flex items-center justify-center">
   <div class="w-full max-w-6xl space-y-10">
 
@@ -957,5 +999,10 @@ if(sessionId && blob && blob.size > 0){
     )}
   </div>
 </div>
+
   );
 }
+
+
+
+

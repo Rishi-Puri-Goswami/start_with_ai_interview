@@ -3,8 +3,24 @@
 const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api/deepgram-tts`;
 
 
+// Global audio context and destination for mixing AI audio with video recording
+let globalAudioContext = null;
+let globalDestination = null;
+
+/**
+ * Get or create the global audio context and destination for mixing
+ */
+export function getAudioMixingContext() {
+    if (!globalAudioContext) {
+        globalAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        globalDestination = globalAudioContext.createMediaStreamDestination();
+    }
+    return { audioContext: globalAudioContext, destination: globalDestination };
+}
+
 /**
  * Creates an audio element from base64 data and plays it
+ * Also routes the audio through the mixing context so it can be recorded
  */
 async function createAndPlayAudio(base64Data, autoPlay = true) {
     try {
@@ -32,6 +48,14 @@ async function createAndPlayAudio(base64Data, autoPlay = true) {
         // Create audio element
         const audio = new Audio(audioUrl);
         audio.preload = 'auto';
+
+        // Route audio through the mixing context for recording
+        const { audioContext, destination } = getAudioMixingContext();
+        const source = audioContext.createMediaElementSource(audio);
+        
+        // Connect to both destination (for recording) and audioContext.destination (for playback)
+        source.connect(destination);
+        source.connect(audioContext.destination);
 
         if (autoPlay) {
             // Return a promise that resolves when playback ends
