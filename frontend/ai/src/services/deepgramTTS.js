@@ -3,6 +3,7 @@
 const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api/deepgram-tts`;
 
 
+
 // Global audio context and destination for mixing AI audio with video recording
 let globalAudioContext = null;
 let globalDestination = null;

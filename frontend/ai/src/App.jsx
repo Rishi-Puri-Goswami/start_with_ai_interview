@@ -6,6 +6,7 @@ import ResumeUpload from './component/ResumeUpload';
 import RegisterOwner from './component/owner/RegisterOwner';
 import ProfileOwner from './component/owner/ProfileOwner';
 import LoginOwner from './component/owner/LoginOwner';
+import Notice from './component/Notice';
 
 const IDNotFound = () => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -23,6 +24,7 @@ const App = () => {
       <Routes>
         <Route path="/" element={<IDNotFound />} />
         <Route path="/:id/login" element={<Login />} />
+        <Route path="/:id/notice" element={<Notice />} />
         {/* <Route path="/:id/upload-resume" element={<ResumeUpload />} /> */}
         <Route path="/:id/interview" element={<Interview />} />
       <Route path="/r/o" element={<RegisterOwner />} />

@@ -54,5 +54,3 @@ export function setAuthToken(newToken) {
 }
 
 export default socket;
-
-

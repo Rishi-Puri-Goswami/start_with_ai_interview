@@ -66,9 +66,9 @@ console.log("Login component, ID from URL:", id);
         if (userIdFromResponse) {
           setCookie('userId', userIdFromResponse, 1);
         }
-        // Redirect to interview page with the same ID after successful login
+        // Redirect to notice page with the same ID after successful login
         if(id){
-          navigate(`/${id}/interview`);
+          navigate(`/${id}/notice`);
         } else {
           console.error('No ID found in URL');
           alert('Session ID not found. Please use a valid interview URL.');

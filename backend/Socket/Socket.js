@@ -20,7 +20,13 @@ export function initSocket(server, opts = {}) {
       credentials: true,
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cookie']
     },
-    allowEIO3: true, 
+    allowEIO3: true,
+    maxHttpBufferSize: 5e6, // 5MB - increased for large audio chunks
+    pingTimeout: 60000, // 60 seconds - prevent premature disconnection
+    pingInterval: 25000, // 25 seconds - keep connection alive
+    connectTimeout: 45000, // 45 seconds
+    upgradeTimeout: 30000, // 30 seconds
+    transports: ['websocket', 'polling'], // Allow both for reliability
     ...opts,
   });
 
@@ -140,6 +146,12 @@ let sarvamSessionOpen = false;
 let sarvamFlushPending = false;
 let sarvamCloseTimeout = null;
 
+// Audio buffering to prevent overload
+let audioBuffer = [];
+let bufferFlushTimer = null;
+const BUFFER_FLUSH_INTERVAL = 100; // ms - flush every 100ms
+const MAX_BUFFER_SIZE = 10; // max chunks before force flush
+
 const SARVAM_KEY = "sk_2udpa4kp_LHM7SG4tvNt8BN1lUxxrX0Cd";
 if (!SARVAM_KEY) {
   console.warn('⚠️ SARVAM_API_KEY not set in environment. Set process.env.SARVAM_API_KEY');
@@ -151,6 +163,44 @@ function emitToClient(event, payload) {
     socket.emit(event, payload);
   } catch (e) {
     console.warn('emitToClient failed', e);
+  }
+}
+
+// Helper to flush audio buffer to Sarvam
+function flushAudioBuffer() {
+  if (audioBuffer.length === 0) return;
+  if (!sarvamWS || sarvamWS.readyState !== WebSocket.OPEN) {
+    console.warn('⚠️ Cannot flush - Sarvam WS not open');
+    audioBuffer = []; // Clear buffer
+    return;
+  }
+
+  try {
+    // Concatenate all buffered chunks
+    const totalLength = audioBuffer.reduce((sum, buf) => sum + buf.length, 0);
+    const combined = Buffer.concat(audioBuffer, totalLength);
+    
+    // Convert to base64
+    const base64 = combined.toString('base64');
+    
+    // Send combined chunk
+    const audioMessage = {
+      audio: {
+        data: base64,
+        sample_rate: '16000',
+        encoding: 'audio/wav',
+        input_audio_codec: 'pcm_s16le'
+      }
+    };
+    
+    sarvamWS.send(JSON.stringify(audioMessage));
+    console.log(`📤 Flushed ${audioBuffer.length} chunks (${totalLength} bytes) to Sarvam`);
+    
+    // Clear buffer after successful send
+    audioBuffer = [];
+  } catch (err) {
+    console.error('❌ Failed to flush audio buffer to Sarvam:', err.message);
+    audioBuffer = []; // Clear buffer even on error to prevent memory leak
   }
 }
 
@@ -192,6 +242,11 @@ socket.on('start-sarvam-stt', (opts = {}) => {
     console.log('✅ Sarvam STT websocket opened for socket', socket.id);
     sarvamSessionOpen = true;
     emitToClient('sarvam-ready', { ok: true });
+    
+    // Start buffer flush timer
+    bufferFlushTimer = setInterval(() => {
+      flushAudioBuffer();
+    }, BUFFER_FLUSH_INTERVAL);
   });
 
   sarvamWS.on('message', (raw) => {
@@ -279,6 +334,20 @@ socket.on('start-sarvam-stt', (opts = {}) => {
   sarvamWS.on('close', (code, reason) => {
     console.log('⛔ Sarvam WS closed', code, reason && reason.toString());
     sarvamSessionOpen = false;
+    
+    // Clear buffer timer
+    if (bufferFlushTimer) {
+      clearInterval(bufferFlushTimer);
+      bufferFlushTimer = null;
+    }
+    
+    // Flush any remaining buffered audio
+    if (audioBuffer.length > 0) {
+      console.log('📤 Flushing remaining buffer before close');
+      // Note: can't flush since WS is closed, just log
+      audioBuffer = [];
+    }
+    
     // When server closes, try to emit any remaining accumulated transcript as final
     const finalText = sarvamAccumulatedTranscript.trim();
     if (finalText) {
@@ -299,11 +368,10 @@ socket.on('start-sarvam-stt', (opts = {}) => {
   });
 });
 
-// Receive audio chunk from frontend and forward to Sarvam
+// Receive audio chunk from frontend and buffer it
 socket.on('audio-chunk', (chunk) => {
-  // chunk can be Buffer, Uint8Array or ArrayBuffer or object depending on client
   if (!sarvamWS || sarvamWS.readyState !== WebSocket.OPEN) {
-    console.warn('audio-chunk received but sarvamWS not open');
+    console.warn('⚠️ audio-chunk received but sarvamWS not open');
     return;
   }
 
@@ -314,48 +382,53 @@ socket.on('audio-chunk', (chunk) => {
     else if (chunk instanceof ArrayBuffer) buf = Buffer.from(chunk);
     else if (ArrayBuffer.isView(chunk)) buf = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
     else if (typeof chunk === 'object' && chunk.data) {
-      // sometimes socket.io wraps binary in { data: ... }
       const incoming = chunk.data;
       if (Buffer.isBuffer(incoming)) buf = incoming;
       else if (incoming instanceof ArrayBuffer) buf = Buffer.from(incoming);
       else if (ArrayBuffer.isView(incoming)) buf = Buffer.from(incoming.buffer, incoming.byteOffset, incoming.byteLength);
       else buf = Buffer.from(incoming);
     } else {
-      // fallback: try Buffer.from
       buf = Buffer.from(chunk);
     }
   } catch (err) {
-    console.error('Failed to normalize audio chunk to Buffer', err);
+    console.error('❌ Failed to normalize audio chunk to Buffer', err);
     return;
   }
 
-  // Convert to base64 (Sarvam expects base64 inside JSON audio.data)
-  const base64 = buf.toString('base64');
-
-  // Build the audio message per Sarvam AsyncAPI schema
-  const audioMessage = {
-    audio: {
-      data: base64,
-      sample_rate: '16000',
-      encoding: 'audio/wav',         // keeping audio/wav per schema; Sarvam accepts pcm_s16le as input_audio_codec
-      input_audio_codec: 'pcm_s16le' // we send raw PCM signed 16-bit little-endian
-    }
-  };
-
-  try {
-    sarvamWS.send(JSON.stringify(audioMessage));
-  } catch (err) {
-    console.error('Failed to send audio chunk to Sarvam WS', err);
+  // Add to buffer
+  audioBuffer.push(buf);
+  
+  // Force flush if buffer gets too large
+  if (audioBuffer.length >= MAX_BUFFER_SIZE) {
+    console.log('⚠️ Buffer size limit reached, force flushing');
+    flushAudioBuffer();
   }
 });
 
 // Stop / flush the Sarvam session and request final transcript
 socket.on('stop-sarvam-stt', () => {
+  console.log('🛑 Received stop-sarvam-stt');
+  
+  // Flush any remaining buffered audio immediately
+  if (audioBuffer.length > 0) {
+    console.log('📤 Flushing final audio buffer');
+    flushAudioBuffer();
+  }
+  
+  // Clear buffer timer
+  if (bufferFlushTimer) {
+    clearInterval(bufferFlushTimer);
+    bufferFlushTimer = null;
+  }
+  
   if (!sarvamWS || sarvamWS.readyState !== WebSocket.OPEN) {
-    console.log('stop-sarvam-stt but sarvamWS not open');
+    console.log('⚠️ stop-sarvam-stt but sarvamWS not open');
     // still emit final if any accumulated
     const finalText = (sarvamAccumulatedTranscript || '').trim();
-    if (finalText) emitToClient('sarvam-transcript-final', { text: finalText });
+    if (finalText) {
+      console.log('📝 Emitting accumulated transcript:', finalText);
+      emitToClient('sarvam-transcript-final', { text: finalText });
+    }
     sarvamAccumulatedTranscript = '';
     return;
   }
@@ -364,36 +437,57 @@ socket.on('stop-sarvam-stt', () => {
   try {
     sarvamFlushPending = true;
     sarvamWS.send(JSON.stringify({ type: 'flush' }));
+    console.log('📨 Sent flush signal to Sarvam');
     // After sending flush, give Sarvam a short window (e.g. 3s) to respond with final events/data
     if (sarvamCloseTimeout) clearTimeout(sarvamCloseTimeout);
     sarvamCloseTimeout = setTimeout(() => {
+      console.log('⏰ Flush timeout reached, closing connection');
       try {
         if (sarvamWS && sarvamWS.readyState === WebSocket.OPEN) {
           sarvamWS.close();
         }
       } catch {}
-    }, 3000); // adjust if you want to wait longer
+    }, 3000);
   } catch (err) {
-    console.error('Failed to send flush to Sarvam WS', err);
-    // fallback: close connection
+    console.error('❌ Failed to send flush to Sarvam WS', err);
+    // fallback: close connection and emit whatever we have
+    const finalText = (sarvamAccumulatedTranscript || '').trim();
+    if (finalText) {
+      emitToClient('sarvam-transcript-final', { text: finalText });
+      sarvamAccumulatedTranscript = '';
+    }
     try { sarvamWS.close(); } catch {}
   }
 });
 
 // Cleanup on disconnect
 socket.on('disconnect', () => {
-  if (sarvamWS && sarvamWS.readyState === WebSocket.OPEN) {
-    try { sarvamWS.close(); } catch (e) {}
+  console.log('🔌 Client disconnected, cleaning up Sarvam resources');
+  
+  // Clear buffer timer
+  if (bufferFlushTimer) {
+    clearInterval(bufferFlushTimer);
+    bufferFlushTimer = null;
   }
+  
+  // Clear buffer
+  audioBuffer = [];
+  
+  // Close Sarvam WS
+  if (sarvamWS && sarvamWS.readyState === WebSocket.OPEN) {
+    try { 
+      sarvamWS.close(); 
+      console.log('✅ Closed Sarvam WS on disconnect');
+    } catch (e) {
+      console.warn('Error closing Sarvam WS:', e);
+    }
+  }
+  
   if (sarvamCloseTimeout) {
     clearTimeout(sarvamCloseTimeout);
     sarvamCloseTimeout = null;
   }
 });
-
-
-
-
 
 
 
