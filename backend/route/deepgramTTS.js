@@ -14,6 +14,108 @@ const deepgramApiKey = process.env.DEEPGRAM_API_KEY || null;
 // Note: ElevenLabs TTS SDK and related endpoints have been removed.
 // The ELEVENLABS_API_KEY may still be used by other endpoints (e.g. STT) that call the ElevenLabs REST API directly.
 
+// ============================================================================
+// OPTIMIZATION: Simple LRU Cache for Common Phrases (Phase 1)
+// ============================================================================
+const TTS_CACHE_MAX_SIZE = 50; // Cache up to 50 common phrases
+const ttsCache = new Map();
+
+function getCachedAudio(text, options = {}) {
+    // Create cache key from text + relevant options
+    const cacheKey = `${text}|${options.target_language_code || 'hi-IN'}|${options.speaker || 'meera'}|${options.pace || 1.1}`;
+    
+    if (ttsCache.has(cacheKey)) {
+        const entry = ttsCache.get(cacheKey);
+        // Move to end (LRU)
+        ttsCache.delete(cacheKey);
+        ttsCache.set(cacheKey, entry);
+        console.log('💾 Cache HIT for:', text.substring(0, 50));
+        return entry;
+    }
+    
+    console.log('❌ Cache MISS for:', text.substring(0, 50));
+    return null;
+}
+
+function setCachedAudio(text, options = {}, base64Audio) {
+    const cacheKey = `${text}|${options.target_language_code || 'hi-IN'}|${options.speaker || 'meera'}|${options.pace || 1.1}`;
+    
+    // If cache full, remove oldest entry (first in Map)
+    if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
+        const firstKey = ttsCache.keys().next().value;
+        ttsCache.delete(firstKey);
+    }
+    
+    ttsCache.set(cacheKey, base64Audio);
+    console.log('💾 Cached audio for:', text.substring(0, 50), '(cache size:', ttsCache.size, ')');
+}
+
+// Common interview phrases to pre-cache on startup
+const COMMON_PHRASES = [
+    "Hello, welcome to the interview.",
+    "Thank you for that answer.",
+    "Can you tell me more about that?",
+    "That's interesting.",
+    "Let's move on to the next question.",
+    "नमस्ते, साक्षात्कार में आपका स्वागत है।",
+    "उस उत्तर के लिए धन्यवाद।",
+    "क्या आप इसके बारे में और बता सकते हैं?",
+    "यह दिलचस्प है।",
+    "आइए अगले सवाल पर चलते हैं।"
+];
+
+// Pre-cache common phrases on startup (optional - can be disabled)
+async function preCacheCommonPhrases() {
+    console.log('🔄 Pre-caching common interview phrases...');
+    const sarvamApiKey = process.env.SARVAM_API || null;
+    if (!sarvamApiKey) {
+        console.warn('⚠️ Cannot pre-cache: SARVAM_API_KEY not configured');
+        return;
+    }
+    
+    const sarvam = new SarvamAIClient({ apiSubscriptionKey: sarvamApiKey });
+    let cachedCount = 0;
+    
+    for (const phrase of COMMON_PHRASES) {
+        try {
+            const opts = {
+                text: phrase,
+                target_language_code: 'hi-IN',
+                speaker: 'meera',
+                pace: 1.1,
+                speech_sample_rate: 16000,
+                enable_preprocessing: false,
+                model: 'bulbul:v2'
+            };
+            
+            const ttsResponse = await sarvam.textToSpeech.convert(opts);
+            let base64 = null;
+            
+            if (ttsResponse && ttsResponse.audio_url) {
+                const audioRes = await axios.get(ttsResponse.audio_url, { responseType: 'arraybuffer' });
+                base64 = Buffer.from(audioRes.data).toString('base64');
+            } else if (ttsResponse && (ttsResponse.audio_base64 || ttsResponse.audio)) {
+                base64 = ttsResponse.audio_base64 || ttsResponse.audio;
+            }
+            
+            if (base64) {
+                setCachedAudio(phrase, opts, base64);
+                cachedCount++;
+            }
+        } catch (err) {
+            console.warn('⚠️ Failed to pre-cache phrase:', phrase.substring(0, 30), err.message);
+        }
+    }
+    
+    console.log(`✅ Pre-cached ${cachedCount}/${COMMON_PHRASES.length} common phrases`);
+}
+
+// Start pre-caching (runs async, doesn't block server startup)
+if (process.env.DISABLE_TTS_PRECACHE !== '1') {
+    setTimeout(() => preCacheCommonPhrases(), 2000); // Wait 2s after server start
+}
+// ============================================================================
+
 // Test endpoint to check Deepgram connection
 router.get("/test", async (req, res) => {
   try {
@@ -69,6 +171,31 @@ router.post("/speak", async (req, res) => {
       return res.status(400).json({ success: false, error: 'Text is required.' });
     }
 
+    // Accept optional TTS options from client
+    const opts = {
+      target_language_code: req.body.target_language_code,
+      speaker: req.body.speaker,
+      pitch: req.body.pitch,
+      pace: req.body.pace,
+      loudness: req.body.loudness,
+      speech_sample_rate: req.body.speech_sample_rate,
+      enable_preprocessing: req.body.enable_preprocessing,
+      model: req.body.model
+    };
+
+    // OPTIMIZATION: Check cache first
+    const cachedAudio = getCachedAudio(text, opts);
+    if (cachedAudio) {
+      console.log('✅ Returning cached audio (instant response)');
+      return res.json({ 
+        success: true, 
+        audioBase64: cachedAudio, 
+        textLength: text.length, 
+        method: 'sarvam-cached', 
+        message: 'Speech generated from cache (instant)' 
+      });
+    }
+
     // Read Sarvam API key from environment to avoid embedding secrets in code
     const sarvamApiKey = process.env.SARVAM_API || null;
     if (!sarvamApiKey) {
@@ -79,19 +206,8 @@ router.post("/speak", async (req, res) => {
     // Initialize Sarvam client
     const sarvam = new SarvamAIClient({ apiSubscriptionKey: sarvamApiKey });
 
-    // Accept optional TTS options from client
-    const opts = {
-      text,
-      // allow callers to override any of these fields
-      target_language_code: req.body.target_language_code,
-      speaker: req.body.speaker,
-      pitch: req.body.pitch,
-      pace: req.body.pace,
-      loudness: req.body.loudness,
-      speech_sample_rate: req.body.speech_sample_rate,
-      enable_preprocessing: req.body.enable_preprocessing,
-      model: req.body.model
-    };
+    // Add text to opts
+    opts.text = text;
 
     console.log('🎯 Sarvam TTS request received (text length:', text.length, ')');
 
@@ -122,6 +238,9 @@ router.post("/speak", async (req, res) => {
       console.error('❌ Sarvam TTS returned no audio data; full response:', JSON.stringify(ttsResponse || {}, null, 2));
       return res.status(500).json({ success: false, error: 'Sarvam TTS returned no audio' });
     }
+
+    // OPTIMIZATION: Cache the generated audio for future use
+    setCachedAudio(text, opts, base64);
 
     console.log('✅ Sarvam TTS conversion successful, size (base64 chars):', base64.length);
     return res.json({ success: true, audioBase64: base64, textLength: text.length, method: 'sarvam', message: 'Speech generated successfully using Sarvam' });

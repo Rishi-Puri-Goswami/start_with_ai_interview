@@ -7,7 +7,6 @@ import { client } from '../redis/redis.js';
 import { IntreviewResult } from '../model/intreviewResult.js';
 import mongoose from 'mongoose';
 import {Candidate} from '../model/usermodel.js';
-import { json } from 'express';
 
 
 export function initSocket(server, opts = {}) {
@@ -149,8 +148,10 @@ let sarvamCloseTimeout = null;
 // Audio buffering to prevent overload
 let audioBuffer = [];
 let bufferFlushTimer = null;
-const BUFFER_FLUSH_INTERVAL = 100; // ms - flush every 100ms
-const MAX_BUFFER_SIZE = 10; // max chunks before force flush
+const BUFFER_FLUSH_INTERVAL = 50; // REDUCED: ms - flush every 50ms (was 100ms) for lower latency
+const MAX_BUFFER_SIZE = 5; // REDUCED: max chunks before force flush (was 10) - prevent data loss
+let totalChunksReceived = 0; // Track total chunks for debugging
+let totalChunksSent = 0; // Track chunks sent to Sarvam
 
 const SARVAM_KEY = "sk_2udpa4kp_LHM7SG4tvNt8BN1lUxxrX0Cd";
 if (!SARVAM_KEY) {
@@ -194,7 +195,8 @@ function flushAudioBuffer() {
     };
     
     sarvamWS.send(JSON.stringify(audioMessage));
-    console.log(`📤 Flushed ${audioBuffer.length} chunks (${totalLength} bytes) to Sarvam`);
+    totalChunksSent += audioBuffer.length;
+    console.log(`📤 Flushed ${audioBuffer.length} chunks (${totalLength} bytes) to Sarvam [Total: ${totalChunksSent}]`);
     
     // Clear buffer after successful send
     audioBuffer = [];
@@ -211,6 +213,11 @@ socket.on('start-sarvam-stt', (opts = {}) => {
     console.log('Sarvam WS already open for this socket');
     return;
   }
+
+  // Reset counters for new session
+  totalChunksReceived = 0;
+  totalChunksSent = 0;
+  audioBuffer = [];
 
   // Build query params per Sarvam asyncAPI
   const languageCode = (opts.languageCode || 'en-IN');
@@ -375,6 +382,8 @@ socket.on('audio-chunk', (chunk) => {
     return;
   }
 
+  totalChunksReceived++;
+
   // Normalize to Buffer
   let buf;
   try {
@@ -398,6 +407,11 @@ socket.on('audio-chunk', (chunk) => {
   // Add to buffer
   audioBuffer.push(buf);
   
+  // Log every 20 chunks
+  if (totalChunksReceived % 20 === 0) {
+    console.log(`📊 Received ${totalChunksReceived} chunks, buffer: ${audioBuffer.length}`);
+  }
+  
   // Force flush if buffer gets too large
   if (audioBuffer.length >= MAX_BUFFER_SIZE) {
     console.log('⚠️ Buffer size limit reached, force flushing');
@@ -407,11 +421,11 @@ socket.on('audio-chunk', (chunk) => {
 
 // Stop / flush the Sarvam session and request final transcript
 socket.on('stop-sarvam-stt', () => {
-  console.log('🛑 Received stop-sarvam-stt');
+  console.log(`🛑 Received stop-sarvam-stt [Received: ${totalChunksReceived}, Sent: ${totalChunksSent} chunks]`);
   
   // Flush any remaining buffered audio immediately
   if (audioBuffer.length > 0) {
-    console.log('📤 Flushing final audio buffer');
+    console.log(`📤 Flushing final ${audioBuffer.length} audio chunks`);
     flushAudioBuffer();
   }
   

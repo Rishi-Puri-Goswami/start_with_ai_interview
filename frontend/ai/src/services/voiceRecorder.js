@@ -14,6 +14,26 @@ function floatTo16BitPCM(input) {
   return output;
 }
 
+// Helper function to get language code from localStorage
+function getLanguageCode() {
+  try {
+    const interviewDetails = JSON.parse(localStorage.getItem('interviewdetails'));
+    console.log("interviewdetails retrieved from localStorage", interviewDetails ? interviewDetails.launguage : "no details found");
+    
+    const language = interviewDetails?.launguage;
+    
+    // Convert language to language code
+    if (language && language.toLowerCase() === 'hindi') {
+      return 'hi-IN';
+    } else {
+      // Default to English
+      return 'en-IN';
+    }
+  } catch (error) {
+    console.error('Error reading language from localStorage:', error);
+    return 'en-IN'; // Default to English on error
+  }
+}
 
 // WAV header
 function createWavHeader(sampleRate, numSamples, numChannels = 1, bitsPerSample = 16) {
@@ -60,14 +80,15 @@ class SimpleVoiceRecorder {
     this.onNoSpeech = null;
     this.partialTranscriptBuffer = '';
     this.noSpeechTimeout = 3000;
-    this.minRecordingDuration = 900;
+    this.minRecordingDuration = 500; // Reduced from 900ms to 500ms to catch shorter utterances
     this.sampleRate = 16000;
     this.noSpeechTimer = null;
 
     // Chunk batching to reduce socket calls
     this.chunkBuffer = [];
-    this.chunkBatchSize = 3; // Send every 3 chunks
+    this.chunkBatchSize = 1; // CHANGED: Send immediately (was 3) - prevent data loss
     this.chunkCounter = 0;
+    this.totalChunksSent = 0; // Track total chunks sent for debugging
     
     // Error handling
     this.socketConnected = true;
@@ -77,7 +98,8 @@ class SimpleVoiceRecorder {
     // Heartbeat to keep connection alive during long recordings
     this.heartbeatInterval = null;
     this.lastChunkTime = Date.now();
-    this.maxSilenceDuration = 30000; // 30 seconds max silence
+    this.maxSilenceDuration = 120000; // 120 seconds (2 minutes) max silence - increased for long answers
+    this.isSpeaking = false; // Track if user is currently speaking
     
     // Monitor socket connection
     this.setupSocketMonitoring();
@@ -94,10 +116,14 @@ class SimpleVoiceRecorder {
       if (this.isRecording) {
         const timeSinceLastChunk = Date.now() - this.lastChunkTime;
         
-        // If too long without chunks, something might be wrong
-        if (timeSinceLastChunk > this.maxSilenceDuration) {
-          console.warn('⚠️ No chunks for 30s, stopping recording');
+        // Only stop if we're NOT actively speaking and silence is too long
+        // This prevents stopping during long continuous speech
+        if (!this.isSpeaking && timeSinceLastChunk > this.maxSilenceDuration) {
+          console.warn('⚠️ No chunks for 2 minutes after speech ended, stopping recording');
           this.stopListening();
+        } else if (this.isSpeaking && timeSinceLastChunk > 10000) {
+          // If speaking but no chunks for 10s, send heartbeat to keep connection alive
+          console.log('💓 Heartbeat - keeping connection alive during long speech');
         }
       }
     }, 5000); // Check every 5 seconds
@@ -174,18 +200,28 @@ class SimpleVoiceRecorder {
             return;
           }
           
+          // Mark that user is actively speaking
+          this.isSpeaking = true;
+
+          // Get language code from localStorage
+          const languageCode = getLanguageCode();
+          console.log('🌐 Using language code:', languageCode);
+
           socket.emit("start-sarvam-stt", {
-            languageCode: 'en-IN',
+            languageCode: languageCode,
             model: 'saarika:v2.5',
             sample_rate: '16000'
           });
 
           this.chunkBuffer = [];
           this.chunkCounter = 0;
+          this.totalChunksSent = 0; // Reset counter
           this.lastChunkTime = Date.now();
           clearTimeout(this.noSpeechTimer);
           this.isRecording = true;
           this.recordingStartTime = Date.now();
+          
+          console.log('✅ STT session started - ready to receive audio');
           
           // Start heartbeat monitoring
           this.startHeartbeat();
@@ -193,24 +229,37 @@ class SimpleVoiceRecorder {
 
         onSpeechEnd: async (audio) => {
           const duration = Date.now() - this.recordingStartTime;
-          console.log(`🔇 Voice End — duration: ${duration}ms`);
+          console.log(`🔇 Voice End — duration: ${duration}ms (${(duration / 1000).toFixed(1)}s)`);
+          
+          // Log if this was a long recording
+          if (duration > 30000) {
+            console.log(`📢 Long speech detected: ${(duration / 1000).toFixed(1)}s - processing...`);
+          }
+          
+          // Mark that user stopped speaking
+          this.isSpeaking = false;
           this.isRecording = false;
           
           // Stop heartbeat
           this.stopHeartbeat();
 
-          // Validate minimum duration
+          // Validate minimum duration (relaxed for long recordings)
           if (duration < this.minRecordingDuration) {
-            console.warn('⚠️ Recording too short, ignoring');
+            console.warn(`⚠️ Recording too short (${duration}ms < ${this.minRecordingDuration}ms), ignoring`);
             return;
           }
 
           // Send any remaining buffered chunks first
           if (this.chunkBuffer.length > 0) {
-            console.log(`📤 Flushing ${this.chunkBuffer.length} remaining chunks`);
-            this.chunkBuffer.forEach(bufferedChunk => {
-              socket.emit("audio-chunk", bufferedChunk);
-            });
+            console.log(`📤 Flushing ${this.chunkBuffer.length} remaining chunks before final chunk`);
+            for (const bufferedChunk of this.chunkBuffer) {
+              try {
+                socket.emit("audio-chunk", bufferedChunk);
+                this.totalChunksSent++;
+              } catch (error) {
+                console.error('❌ Error sending buffered chunk:', error);
+              }
+            }
             this.chunkBuffer = [];
             this.chunkCounter = 0;
           }
@@ -224,6 +273,7 @@ class SimpleVoiceRecorder {
             for (let attempt = 0; attempt < 3 && !sent; attempt++) {
               try {
                 socket.emit("audio-chunk", pcmChunk);
+                this.totalChunksSent++;
                 sent = true;
                 console.log(`✅ Final chunk sent (attempt ${attempt + 1})`);
               } catch (error) {
@@ -238,7 +288,11 @@ class SimpleVoiceRecorder {
               console.error('❌ Failed to send final chunk after 3 attempts');
             }
 
-            // Send stop signal
+            // Log total chunks sent
+            console.log(`📊 Total chunks sent: ${this.totalChunksSent} over ${(duration / 1000).toFixed(1)}s`);
+
+            // Send stop signal with small delay to ensure all chunks arrived
+            await new Promise(resolve => setTimeout(resolve, 100));
             socket.emit("stop-sarvam-stt");
             console.log('📤 Sent stop signal to backend');
           } else {
@@ -247,7 +301,7 @@ class SimpleVoiceRecorder {
         },
       });
 
-      // STREAM LIVE AUDIO CHUNKS — BATCHED FOR EFFICIENCY
+      // STREAM LIVE AUDIO CHUNKS — SEND IMMEDIATELY TO PREVENT DATA LOSS
       this.vadInstance.onAudioChunk = (chunk) => {
         if (this.isRecording && this.socketConnected) {
           const pcmChunk = floatTo16BitPCM(chunk);
@@ -255,31 +309,25 @@ class SimpleVoiceRecorder {
           // Update last chunk time
           this.lastChunkTime = Date.now();
           
-          // Add to batch buffer
-          this.chunkBuffer.push(pcmChunk);
-          this.chunkCounter++;
-          
-          // Send in batches to reduce socket overhead
-          if (this.chunkCounter >= this.chunkBatchSize) {
-            try {
-              // Send all buffered chunks
-              this.chunkBuffer.forEach(bufferedChunk => {
-                socket.emit("audio-chunk", bufferedChunk);
-              });
-              
-              console.log(`📤 Sent batch of ${this.chunkBuffer.length} chunks`);
-              
-              // Clear buffer
-              this.chunkBuffer = [];
-              this.chunkCounter = 0;
-            } catch (error) {
-              console.error('❌ Error sending chunk batch:', error);
-              // Keep buffer for retry on next batch
+          try {
+            // Send immediately to prevent data loss
+            socket.emit("audio-chunk", pcmChunk);
+            this.totalChunksSent++;
+            
+            // Log every 10 chunks to track progress
+            if (this.totalChunksSent % 10 === 0) {
+              console.log(`📊 Chunks sent: ${this.totalChunksSent}`);
+            }
+          } catch (error) {
+            console.error('❌ Error sending audio chunk:', error);
+            // Try to buffer for retry
+            this.chunkBuffer.push(pcmChunk);
+            if (this.chunkBuffer.length > 5) {
+              console.warn('⚠️ Chunk buffer growing, may lose data');
             }
           }
         } else if (!this.socketConnected) {
-          console.warn('⚠️ Socket disconnected, buffering chunks...');
-          // Keep buffering, will try to send when reconnected
+          console.warn('⚠️ Socket disconnected, cannot send chunk');
         }
       };
 

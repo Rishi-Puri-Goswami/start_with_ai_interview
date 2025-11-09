@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Video, VideoOff, Mic, MicOff, Play, Square, Send } from 'lucide-react';
 import socket from "./socket/socket";
 import { useParams, useNavigate } from "react-router-dom";
-import { textToSpeech, getAudioMixingContext } from "../services/deepgramTTS";
+import { textToSpeech, textToSpeechStreaming, getAudioMixingContext } from "../services/deepgramTTS";
 import { SimpleVoiceRecorder } from "../services/voiceRecorder"; 
 import ImageKit from 'imagekit-javascript';
 
@@ -280,7 +280,9 @@ if(sessionId && blob && blob.size > 0){
       
      
       try {
-        await textToSpeech(data.response);
+        // OPTIMIZED: Use streaming TTS for lower latency
+        // Starts speaking individual sentences as AI generates response
+        await textToSpeechStreaming(data.response);
 
         // After AI TTS finishes, switch to user turn and restart recorder
         setActiveSpeaker('user');
