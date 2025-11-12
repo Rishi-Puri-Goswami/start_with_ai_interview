@@ -96,15 +96,48 @@ console.log("Login component, ID from URL:", id);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="p-6 bg-white rounded shadow">
-        <h2 className="text-xl font-semibold mb-4">Sign in with Google</h2>
-        <GoogleLogin onSuccess={handleSuccess} onError={handleError} />
+    <div className="min-h-screen bg-white flex items-center justify-center ">
+      <div className="w-full  items-center justify-center flex flex-col">
+        {/* Logo */}
+        <div>
+
+        <div className="flex items-center gap-2 mb-12">
+          <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center">
+             <svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" rx="43" fill="black"/>
+    <path d="M50.1333 32V67.9333ZM37.0667 40.9833V58.95ZM24 45.475V54.4583ZM63.2 40.9833V58.95ZM76.2667 45.475V54.4583Z" fill="black"/>
+    <path d="M50.1333 32V67.9333M37.0667 40.9833V58.95M24 45.475V54.4583M63.2 40.9833V58.95M76.2667 45.475V54.4583" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+          </div>
+          <span className="text-black font-medium text-lg">Startwith. Interview</span>
+        </div>
+
+        {/* Welcome Text */}
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold text-black mb-2">
+            Welcome to Startwith.
+          </h1>
+          <p className="text-gray-600 text-base ">
+            A new way to sort resume
+          </p>
+        </div>
+
+        </div>
+        {/* Google Login Button */}
+        <div className="w-[20vw]  items-center justify-center flex ">
+          <GoogleLogin 
+            onSuccess={handleSuccess} 
+            onError={handleError}
+            width="100%"
+            theme="outline"
+            size="large"
+            text="continue_with"
+            shape="rectangular"
+          />
+        </div>
       </div>
     </div>
   );
 };
 
 export default Login;
-
-

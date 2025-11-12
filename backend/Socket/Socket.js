@@ -694,19 +694,17 @@ console.log("Interview time info: ijijijiji nijijjjjiji iijijijiijijji ", { star
       const userid = socket.user?._id;
       const useremail = socket.user?.email;
 
-      const { sessionId , videoUrl } = data;
+      const { sessionId, videoUrl, videoUrls } = data;
 
+      // Support both single videoUrl (old) and videoUrls array (new chunked uploads)
+      const finalVideoUrls = videoUrls || (videoUrl ? [videoUrl] : []);
 
-      if(!videoUrl || !sessionId){
-
-        console.log("❌ videoUrl or sessionId missing in end-interview event");
-        return socket.emit("error", "videoUrl or sessionId missing");
+      if (!finalVideoUrls || finalVideoUrls.length === 0 || !sessionId) {
+        console.log("❌ videoUrls or sessionId missing in end-interview event");
+        return socket.emit("error", "videoUrls or sessionId missing");
       }
 
-      console.log("from the end interview" , { sessionId , videoUrl });
-      
-
-console.log("from the end interview" , { sessionId , videoUrl });
+      console.log("from the end interview", { sessionId, videoUrls: finalVideoUrls });
 
       if (!userid || !useremail) {
         return socket.emit("error", "user not authenticated");
@@ -757,7 +755,7 @@ console.log("updating interview", intreviewid);
         intreviewid,
         { 
           feedback, 
-          videoUrl: videoUrl, 
+          videoUrls: finalVideoUrls, // Store array of video URLs
           iscompleted: true,
           transcript: transcript // Save transcript to MongoDB
         },
@@ -802,7 +800,7 @@ console.log("updating interview", intreviewid);
 
 
       console.log("final feedback", feedback);
-      console.log("videoUrl", videoUrl);
+      console.log("videoUrls", finalVideoUrls);
 
       socket.emit("final-feedback", feedback , updatedDetails );
 

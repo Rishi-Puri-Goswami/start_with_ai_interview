@@ -48,6 +48,17 @@ const IntreviewSchema = new Schema({
     type: String, 
   },
 
+  // Array of video URLs for chunked uploads (supports large videos split into parts)
+  videoUrls: {
+    type: [String],
+    default: []
+  },
+
+  // Support multiple video parts for large recordings
+  videoUrls: [{
+    type: String,
+  }],
+
 
   iscompleted : {
     type : Boolean,

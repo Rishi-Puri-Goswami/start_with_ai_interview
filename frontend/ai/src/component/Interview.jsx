@@ -26,6 +26,10 @@ export default function Interview() {
   const [blockedShortcutMsg, setBlockedShortcutMsg] = useState("");
   const [showBlockedNotif, setShowBlockedNotif] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState('none'); // 'user' | 'ai' | 'none'
+  
+  // Chunked upload state
+  const [videoPartUrls, setVideoPartUrls] = useState([]);
+  const [chunkCounter, setChunkCounter] = useState(0);
 
 
 
@@ -42,6 +46,10 @@ const language = interviewDetails.launguage ;
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const blockedTimeoutRef = useRef(null);
+  const chatMessagesRef = useRef(null);
+  const currentChunkDataRef = useRef([]); // Accumulates data for current chunk
+  const videoPartUrlsRef = useRef([]); // Tracks uploaded part URLs
+  const chunkCounterRef = useRef(0); // Tracks chunk number
 
   const { id: sessionId } = useParams(); 
   const navigate = useNavigate();
@@ -84,21 +92,77 @@ const language = interviewDetails.launguage ;
       uploadParams.token = token;
 
 
-      console.log(' Uploading to ImageKit...');
+      console.log('📤 Uploading to ImageKit...');
       const response = await ik.upload(uploadParams);
 
 
       if (response && response.url) {
-        console.log(' Upload success:', response.url);
+        console.log('✅ Upload success:', response.url);
         return response.url;
       } else {
         throw new Error('Upload failed: No URL returned');
       }
     } catch (error) {
-      console.error(' ImageKit upload error:', error);
+      console.error('❌ ImageKit upload error:', error);
       throw error;
     }
   }, []);
+
+  // Upload individual video chunk immediately
+  const uploadVideoChunk = useCallback(async (chunkBlob, sessionId, partNumber) => {
+    try {
+      const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://startwithaiinterview-production.up.railway.app').replace(/\/$/, '');
+      const authUrl = `${API_BASE_URL}/api/user/imagekit-auth`;
+
+      const authResponse = await fetch(authUrl, { credentials: 'include' });
+
+      const contentType = authResponse.headers.get('content-type') || '';
+      if (!authResponse.ok) {
+        const text = await authResponse.text().catch(() => '');
+        throw new Error(`Failed to get ImageKit auth params: ${authResponse.status} ${authResponse.statusText} - ${text.slice(0,200)}`);
+      }
+      if (!contentType.includes('application/json')) {
+        const text = await authResponse.text().catch(() => '');
+        throw new Error(`ImageKit auth did not return JSON. Response content-type=${contentType}. Body starts with: ${text.slice(0,200)}`);
+      }
+
+      const { signature, expire, token, publicKey, urlEndpoint } = await authResponse.json();
+
+      const ik = new ImageKit({ publicKey, urlEndpoint });
+      const uploadParams = {
+        file: chunkBlob,
+        fileName: `interview-${sessionId}-part${partNumber}.webm`,
+      };
+
+      uploadParams.signature = signature;
+      uploadParams.expire = expire;
+      uploadParams.token = token;
+
+      console.log(`📤 Uploading chunk ${partNumber} to ImageKit (${(chunkBlob.size / 1024 / 1024).toFixed(2)} MB)...`);
+      const response = await ik.upload(uploadParams);
+
+      if (response && response.url) {
+        const cleanUrl = response.url.split('?')[0];
+        console.log(`✅ Chunk ${partNumber} uploaded:`, cleanUrl);
+        return cleanUrl;
+      } else {
+        throw new Error('Upload failed: No URL returned');
+      }
+    } catch (error) {
+      console.error(`❌ Chunk ${partNumber} upload error:`, error);
+      throw error;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!chatMessagesRef.current) return;
+    const node = chatMessagesRef.current;
+    try {
+      node.scrollTop = node.scrollHeight;
+    } catch (err) {
+      console.warn('Failed to auto-scroll chat container:', err?.message || err);
+    }
+  }, [messages]);
 
   const stopInterview = async () => {
     console.log('🛑 Stopping interview - cleaning up all resources...');
@@ -167,57 +231,62 @@ const language = interviewDetails.launguage ;
         setRecordedChunks([blob]);
         setFinalVideoBlob(blob);
 
+        // If there are accumulated video part URLs from chunked uploads, send them all
+        if (videoPartUrlsRef.current.length > 0) {
+          console.log(`📤 Sending ${videoPartUrlsRef.current.length} video part URLs to backend...`);
+          
+          socket.emit('end-interview', { 
+            sessionId, 
+            videoUrls: videoPartUrlsRef.current // Send array of all part URLs
+          });
 
-        
-        let videoUrl = null;
-        try {
-          setIsUploading(true);
-          videoUrl = await uploadVideoToImageKit(blob, sessionId);
-          console.log("Uploaded video URL:", videoUrl);
+          console.log('✅ End interview sent with video part URLs:', videoPartUrlsRef.current);
 
-          if (sessionId && videoUrl) {
+          setMessages((prev) => [
+            ...prev,
+            { sender: 'system', text: `Interview ended. ${videoPartUrlsRef.current.length} video parts uploaded successfully.` }
+          ]);
 
+          // Navigate after a short delay
+          setTimeout(() => {
+            navigate(`/${sessionId}/login`);
+          }, 3500);
+        } else {
+          // Fallback: No chunked uploads happened, try uploading the full blob
+          let videoUrl = null;
+          try {
+            setIsUploading(true);
+            videoUrl = await uploadVideoToImageKit(blob, sessionId);
+            console.log("Uploaded video URL:", videoUrl);
 
-            // const baseUrl = videoUrl.split('?')[0];
-            // const mp4Url = baseUrl.endsWith('/ik-video.mp4') ? baseUrl : baseUrl + '/ik-video.mp4';
-            // socket.emit('end-interview', { sessionId, videoUrl: mp4Url });
+            if (sessionId && videoUrl) {
+              const cleanUrl = videoUrl.split('?')[0];
 
-            // console.log('End interview sent with ImageKit MP4 URL', mp4Url);
+              socket.emit('end-interview', { sessionId, videoUrls: [cleanUrl] }); // Send as array for consistency
 
-            // setMessages((prev) => [...prev, { sender: 'system', text: 'Interview end and here is your interview video', url: mp4Url }]);
-            // setUploadedVideoUrl(mp4Url);
+              console.log('End interview sent with ImageKit URL', cleanUrl);
 
-// Use the original ImageKit URL (no /ik-video.mp4)
+              setMessages((prev) => [
+                ...prev,
+                { sender: 'system', text: 'Interview ended. Here is your interview video:', url: cleanUrl }
+              ]);
 
+              setUploadedVideoUrl(cleanUrl);
 
-const cleanUrl = videoUrl.split('?')[0];
-
-socket.emit('end-interview', { sessionId, videoUrl: cleanUrl });
-
-console.log('End interview sent with ImageKit URL', cleanUrl);
-
-setMessages((prev) => [
-  ...prev,
-  { sender: 'system', text: 'Interview ended. Here is your interview video:', url: cleanUrl }
-]);
-
-setUploadedVideoUrl(cleanUrl);
-
-
-
-            // After showing the message for a short time, redirect to login
-            setTimeout(() => {
-              navigate(`/${sessionId}/login`);
-            }, 3500);
-          } else {
-            console.warn('Upload succeeded but missing sessionId or videoUrl', { sessionId, videoUrl });
-            setMessages((prev) => [...prev, { sender: "system", text: ' Video uploaded but URL/session missing' }]);
+              // After showing the message for a short time, redirect to login
+              setTimeout(() => {
+                navigate(`/${sessionId}/login`);
+              }, 3500);
+            } else {
+              console.warn('Upload succeeded but missing sessionId or videoUrl', { sessionId, videoUrl });
+              setMessages((prev) => [...prev, { sender: "system", text: 'Video uploaded but URL/session missing' }]);
+            }
+          } catch (uploadErr) {
+            console.error('Upload error in stopInterview:', uploadErr);
+            setMessages((prev) => [...prev, { sender: 'system', text: 'Video upload failed: ' + (uploadErr.message || uploadErr) }]);
+          } finally {
+            setIsUploading(false);
           }
-        } catch (uploadErr) {
-          console.error('Upload error in stopInterview:', uploadErr);
-          setMessages((prev) => [...prev, { sender: 'system', text: 'Video upload failed: ' + (uploadErr.message || uploadErr) }]);
-        } finally {
-          setIsUploading(false);
         }
 
 
@@ -602,19 +671,89 @@ if(sessionId && blob && blob.size > 0){
       mediaRecorderRef.current = mediaRecorder;
 
       chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => e.data && e.data.size > 0 && chunksRef.current.push(e.data);
-      mediaRecorder.onstop = () => {
+      currentChunkDataRef.current = [];
+      videoPartUrlsRef.current = [];
+      chunkCounterRef.current = 0;
+
+      // Handle data available - collect chunks and upload when size threshold reached
+      mediaRecorder.ondataavailable = async (e) => {
+        if (e.data && e.data.size > 0) {
+          chunksRef.current.push(e.data);
+          currentChunkDataRef.current.push(e.data);
+
+          // Calculate current chunk size
+          const currentChunkSize = currentChunkDataRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+          const sizeMB = currentChunkSize / 1024 / 1024;
+
+          console.log(`📊 Current chunk size: ${sizeMB.toFixed(2)} MB`);
+
+          // Upload when chunk reaches ~180MB (leaving margin under 200MB limit)
+          if (sizeMB >= 180) {
+            try {
+              const chunkBlob = new Blob(currentChunkDataRef.current, { type: 'video/webm' });
+              chunkCounterRef.current += 1;
+              const partNumber = chunkCounterRef.current;
+
+              console.log(`🚀 Uploading chunk ${partNumber} (${sizeMB.toFixed(2)} MB)...`);
+              
+              // Upload chunk immediately
+              const chunkUrl = await uploadVideoChunk(chunkBlob, sessionId, partNumber);
+              
+              // Store the URL
+              videoPartUrlsRef.current.push(chunkUrl);
+              setVideoPartUrls(prev => [...prev, chunkUrl]);
+
+              console.log(`✅ Chunk ${partNumber} uploaded successfully. Total parts: ${videoPartUrlsRef.current.length}`);
+
+              // Clear the current chunk data
+              currentChunkDataRef.current = [];
+            } catch (uploadErr) {
+              console.error('❌ Failed to upload chunk:', uploadErr);
+              setMessages((prev) => [...prev, { 
+                sender: 'system', 
+                text: `Warning: Failed to upload video chunk ${chunkCounterRef.current}. Will retry at end.` 
+              }]);
+            }
+          }
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
         try {
+          // Upload any remaining data as final chunk
+          if (currentChunkDataRef.current.length > 0) {
+            const remainingSize = currentChunkDataRef.current.reduce((acc, chunk) => acc + chunk.size, 0) / 1024 / 1024;
+            
+            if (remainingSize > 0.1) { // Only upload if meaningful size
+              try {
+                const chunkBlob = new Blob(currentChunkDataRef.current, { type: 'video/webm' });
+                chunkCounterRef.current += 1;
+                const partNumber = chunkCounterRef.current;
+
+                console.log(`🚀 Uploading final chunk ${partNumber} (${remainingSize.toFixed(2)} MB)...`);
+                
+                const chunkUrl = await uploadVideoChunk(chunkBlob, sessionId, partNumber);
+                videoPartUrlsRef.current.push(chunkUrl);
+                setVideoPartUrls(prev => [...prev, chunkUrl]);
+
+                console.log(`✅ Final chunk ${partNumber} uploaded. Total parts: ${videoPartUrlsRef.current.length}`);
+              } catch (uploadErr) {
+                console.error('❌ Failed to upload final chunk:', uploadErr);
+              }
+            }
+          }
+
           const blob = new Blob(chunksRef.current, { type: 'video/webm' });
           setRecordedChunks([blob]);
           setFinalVideoBlob(blob);
-          console.log('Video recorded (full blob ready, size=' + (blob.size || 0) + ')');
+          console.log(`📹 Video recorded: ${videoPartUrlsRef.current.length} parts, total size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
         } catch (err) {
           console.error('Failed to build final blob on stop:', err);
         }
       };
 
-      mediaRecorder.start();
+      // Request data every 10 seconds for periodic chunking
+      mediaRecorder.start(10000); // 10 seconds per chunk request
       setIsRecording(true);
       setIsInterviewActive(true);
 
@@ -951,8 +1090,8 @@ if(sessionId && blob && blob.size > 0){
     </div>
 
     {/* Right side: Chat Section (1 column) */}
-    <div className="lg:col-span-1 flex flex-col h-full">
-      <div className="bg-gray-900 rounded-3xl border border-gray-700 shadow-2xl flex flex-col h-full">
+  <div className="lg:col-span-1 flex flex-col h-full max-h-[70vh] lg:max-h-[calc(100vh-280px)]">
+      <div className="bg-gray-900 rounded-3xl border border-gray-700 shadow-2xl flex flex-col h-full overflow-hidden">
         {/* Chat Header */}
         <div className="p-4 border-b border-gray-700 bg-gray-800/50 rounded-t-3xl">
           <h2 className="text-xl font-bold text-white">Conversation</h2>
@@ -960,7 +1099,10 @@ if(sessionId && blob && blob.size > 0){
         </div>
 
         {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar-thin">
+        <div
+          ref={chatMessagesRef}
+          className="flex-1 overflow-y-auto p-6 custom-scrollbar-thin scroll-smooth"
+        >
           {isInterviewActive ? (
             messages.length > 0 ? (
               messages.map((msg, index) => (
@@ -1046,7 +1188,3 @@ if(sessionId && blob && blob.size > 0){
 
   );
 }
-
-
-
-
