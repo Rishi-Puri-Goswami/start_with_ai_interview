@@ -17,6 +17,7 @@ export async function getResumeAnalysis(resumeText) {
 
   
   // --- Deep, Detailed System Prompt ---
+
   const systemInstruction = `
 You are an **expert AI Resume Analyst and Career Advisor** with experience in technical hiring, HR evaluation, and ATS optimization.
 
@@ -188,7 +189,12 @@ const systemText = `
     <li>If at any point the <strong>candidate requests to end</strong> the interview:
       <ul> 
         <li>Do <strong>not</strong> immediately end it. First, ask politely — “Are you sure you want to end the interview?”</li> 
-        <li>If the interview flow was going well or the candidate seemed engaged, gently try to <strong>encourage them</strong> to continue by saying — “You’re doing well so far; would you like to finish the last few questions?”</li>
+        <li>If the interview flow was going well or the candidate seemed engaged, gently try to <strong>encourage them</strong> <li>
+  If the interview flow was going well or the candidate seemed engaged, gently try to <strong>encourage them</strong> to continue. 
+  You should not repeat this exact sentence, but instead say something similar and contextually appropriate to the situation — for example: 
+  <em>“You’re doing great so far! Would you like to continue with the remaining questions?”</em>
+</li> </li>
+
         <li>If the candidate <strong>confirms again</strong> that they want to stop, then respectfully end the interview by sending exactly this text: <strong>[END]</strong>.</li> 
       </ul>
     </li> 
@@ -251,7 +257,7 @@ const systemText = `
       model: 'gemini-2.0-flash',
       systemInstruction: systemText,
       generationConfig: {
-        temperature: 0.5,
+        temperature: 0.4,
         topK: 1,
         topP: 1,
         maxOutputTokens: 100, 
