@@ -97,7 +97,7 @@ console.log("Login component, ID from URL:", id);
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center ">
-      <div className="w-full  items-center justify-center flex flex-col">
+      <div className=" p-2    w-fit  flex flex-col">
         {/* Logo */}
         <div>
 
@@ -109,7 +109,7 @@ console.log("Login component, ID from URL:", id);
     <path d="M50.1333 32V67.9333M37.0667 40.9833V58.95M24 45.475V54.4583M63.2 40.9833V58.95M76.2667 45.475V54.4583" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
           </div>
-          <span className="text-black font-medium text-lg">Startwith. Interview</span>
+          <span className="text-black font-medium text-lg ">Startwith. Interview</span>
         </div>
 
         {/* Welcome Text */}
@@ -124,7 +124,7 @@ console.log("Login component, ID from URL:", id);
 
         </div>
         {/* Google Login Button */}
-        <div className="w-[20vw]  items-center justify-center flex ">
+        <div className="w-[20vw]  items-center    flex ">
           <GoogleLogin 
             onSuccess={handleSuccess} 
             onError={handleError}

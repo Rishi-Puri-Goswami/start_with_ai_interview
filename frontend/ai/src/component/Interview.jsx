@@ -6,6 +6,7 @@ import { textToSpeech, textToSpeechStreaming, getAudioMixingContext } from "../s
 import { SimpleVoiceRecorder } from "../services/voiceRecorder"; 
 import ImageKit from 'imagekit-javascript';
 
+
 export default function Interview() {
   const [isInterviewActive, setIsInterviewActive] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -17,6 +18,19 @@ export default function Interview() {
   const [messages, setMessages] = useState([]); 
   const [userMessage, setUserMessage] = useState("");
   const [socketConnected, setSocketConnected] = useState(socket && socket.connected ? true : false);
+  
+  // Reconnection state
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [showReconnectModal, setShowReconnectModal] = useState(false);
+  
+  // Interview state persistence refs
+  const lastTranscriptRef = useRef("");
+  const interviewStateRef = useRef({
+    wasActive: false,
+    lastMessageTime: null,
+    pendingAudioChunks: []
+  });
 
   const [voiceRecorder, setVoiceRecorder] = useState(null); 
   const [isUploading, setIsUploading] = useState(false);
@@ -30,7 +44,6 @@ export default function Interview() {
   // Chunked upload state
   const [videoPartUrls, setVideoPartUrls] = useState([]);
   const [chunkCounter, setChunkCounter] = useState(0);
-
 
 
   const interviewDetails = JSON.parse(localStorage.getItem('interviewdetails'))
@@ -53,8 +66,6 @@ const language = interviewDetails.launguage ;
 
   const { id: sessionId } = useParams(); 
   const navigate = useNavigate();
-
-
 
 
 
@@ -467,10 +478,94 @@ if(sessionId && blob && blob.size > 0){
     const onConnect = () => {
       console.log('🔌 Socket connected (Interview.jsx):', socket.id);
       setSocketConnected(true);
+      setIsReconnecting(false);
+      setReconnectAttempts(0);
+      setShowReconnectModal(false);
+      
+      // If interview was active before disconnect, restore state
+      if (interviewStateRef.current.wasActive && isInterviewActive) {
+        console.log('🔄 Restoring interview state after reconnection...');
+        
+        // Restart STT session
+        if (voiceRecorder && !voiceRecorder.isListening) {
+          try {
+            const languageCode = language === "Hindi" ? "hi-IN" : "en-IN";
+            socket.emit("start-sarvam-stt", {
+              languageCode: languageCode,
+              model: 'saarika:v2.5',
+              sample_rate: '16000'
+            });
+            
+            // Small delay before restarting listening
+            setTimeout(() => {
+              if (voiceRecorder) {
+                voiceRecorder.startListening();
+                console.log('✅ Voice recorder restarted after reconnection');
+              }
+            }, 500);
+          } catch (err) {
+            console.error('Error restarting STT after reconnection:', err);
+          }
+        }
+        
+        setMessages((prev) => [...prev, { 
+          sender: 'system', 
+          text: '✅ Connection restored. Interview continuing...' 
+        }]);
+      }
     };
+    
     const onDisconnect = (reason) => {
       console.log('🔌 Socket disconnected (Interview.jsx):', reason);
       setSocketConnected(false);
+      
+      // Save interview state if active
+      if (isInterviewActive) {
+        interviewStateRef.current.wasActive = true;
+        interviewStateRef.current.lastMessageTime = Date.now();
+        
+        // Show reconnect modal immediately when disconnected during interview
+        setShowReconnectModal(true);
+        setIsReconnecting(true);
+        
+        setMessages((prev) => [...prev, { 
+          sender: 'system', 
+          text: '⚠️ Connection lost. Attempting to reconnect...' 
+        }]);
+      }
+    };
+    
+    const onReconnectAttempt = (attemptNumber) => {
+      console.log(`🔄 Reconnection attempt #${attemptNumber}`);
+      setIsReconnecting(true);
+      setReconnectAttempts(attemptNumber);
+    };
+    
+    const onReconnect = (attemptNumber) => {
+      console.log(`✅ Reconnected after ${attemptNumber} attempts`);
+      setIsReconnecting(false);
+      setReconnectAttempts(0);
+      setShowReconnectModal(false);
+      
+      if (isInterviewActive) {
+        setMessages((prev) => [...prev, { 
+          sender: 'system', 
+          text: `✅ Reconnected successfully after ${attemptNumber} ${attemptNumber === 1 ? 'attempt' : 'attempts'}` 
+        }]);
+      }
+    };
+    
+    const onReconnectFailed = () => {
+      console.error('❌ All reconnection attempts failed');
+      setIsReconnecting(false);
+      setShowReconnectModal(true);
+      
+      if (isInterviewActive) {
+        setMessages((prev) => [...prev, { 
+          sender: 'system', 
+          text: '❌ Could not reconnect. Please check your internet connection.' 
+        }]);
+      }
     };
 
 
@@ -478,12 +573,54 @@ if(sessionId && blob && blob.size > 0){
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
+    socket.on('reconnect_attempt', onReconnectAttempt);
+    socket.on('reconnect', onReconnect);
+    socket.on('reconnect_failed', onReconnectFailed);
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
+      socket.off('reconnect_attempt', onReconnectAttempt);
+      socket.off('reconnect', onReconnect);
+      socket.off('reconnect_failed', onReconnectFailed);
     };
-  }, []);
+  }, [isInterviewActive, voiceRecorder, language]);
+  
+  // Network status monitoring
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('🌐 Network back online');
+      if (!socket.connected) {
+        console.log('🔄 Attempting to reconnect after network restoration...');
+        socket.connect();
+      }
+      
+      if (isInterviewActive) {
+        setMessages((prev) => [...prev, { 
+          sender: 'system', 
+          text: '🌐 Internet connection restored' 
+        }]);
+      }
+    };
+    
+    const handleOffline = () => {
+      console.warn('🌐 Network went offline');
+      if (isInterviewActive) {
+        setMessages((prev) => [...prev, { 
+          sender: 'system', 
+          text: '⚠️ No internet connection detected' 
+        }]);
+      }
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [isInterviewActive]);
  
  useEffect(() => {
   const listenerOptions = { capture: true, passive: false };
@@ -947,9 +1084,84 @@ if(sessionId && blob && blob.size > 0){
           </div>
         </div>
       )}
+      
+      {/* Reconnection Status Modal */}
+      {(isReconnecting || showReconnectModal) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-gray-900 text-gray-100 p-6 rounded-lg shadow-xl max-w-md w-full mx-4 border border-yellow-600">
+            <div className="flex items-center gap-3 mb-4">
+              {isReconnecting ? (
+                <>
+                  <div className="w-8 h-8 border-4 border-t-transparent border-yellow-500 rounded-full animate-spin"></div>
+                  <h3 className="text-lg font-bold text-yellow-400">Reconnecting...</h3>
+                </>
+              ) : (
+                <>
+                  <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+                    <span className="text-white font-bold">!</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-red-400">Connection Lost</h3>
+                </>
+              )}
+            </div>
+            
+            <div className="space-y-3 text-sm text-gray-300">
+              {isReconnecting ? (
+                <>
+                  <p>Attempting to restore connection...</p>
+                  <p className="text-yellow-400">Attempt #{reconnectAttempts}</p>
+                  <p className="text-xs text-gray-400">Your interview progress is saved. Please wait while we reconnect.</p>
+                </>
+              ) : (
+                <>
+                  <p>Unable to reach the server. Your interview is paused.</p>
+                  <p className="text-xs text-gray-400">
+                    • Check your internet connection<br/>
+                    • Your progress has been saved<br/>
+                    • Interview will resume automatically when connected
+                  </p>
+                </>
+              )}
+            </div>
+            
+            {!isReconnecting && (
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    console.log('🔄 Manual reconnect triggered');
+                    socket.connect();
+                    setIsReconnecting(true);
+                  }}
+                  className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md font-semibold"
+                >
+                  Retry Connection
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowReconnectModal(false);
+                    if (isInterviewActive) {
+                      await stopInterview();
+                    }
+                  }}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md"
+                >
+                  End Interview
+                </button>
+              </div>
+            )}
+            
+            {isReconnecting && (
+              <div className="mt-4 text-xs text-center text-gray-500">
+                This may take a few moments...
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* Fullscreen UI removed — fullscreen is triggered only from Start Interview click */}
-      {!socketConnected && (
-        <p className="text-red-500 text-sm mt-2 animate-pulse font-medium">Socket disconnected – Reconnect to start</p>
+      {!socketConnected && !isReconnecting && !showReconnectModal && (
+        <p className="text-red-500 text-sm mt-2 animate-pulse font-medium">Socket disconnected – Reconnecting automatically...</p>
       )}
     </div>
 
