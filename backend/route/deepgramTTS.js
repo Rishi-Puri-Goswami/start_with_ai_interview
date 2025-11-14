@@ -22,7 +22,7 @@ const ttsCache = new Map();
 
 function getCachedAudio(text, options = {}) {
     // Create cache key from text + relevant options
-    const cacheKey = `${text}|${options.target_language_code || 'hi-IN'}|${options.speaker || 'meera'}|${options.pace || 1.1}`;
+    const cacheKey = `${text}|${options.target_language_code || 'hi-IN'}|${options.speaker || 'abhilash'}|${options.pace || 1.05}|${options.speech_sample_rate || 24000}`;
     
     if (ttsCache.has(cacheKey)) {
         const entry = ttsCache.get(cacheKey);
@@ -38,7 +38,7 @@ function getCachedAudio(text, options = {}) {
 }
 
 function setCachedAudio(text, options = {}, base64Audio) {
-    const cacheKey = `${text}|${options.target_language_code || 'hi-IN'}|${options.speaker || 'meera'}|${options.pace || 1.1}`;
+    const cacheKey = `${text}|${options.target_language_code || 'hi-IN'}|${options.speaker || 'abhilash'}|${options.pace || 1.05}|${options.speech_sample_rate || 24000}`;
     
     // If cache full, remove oldest entry (first in Map)
     if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
@@ -81,10 +81,11 @@ async function preCacheCommonPhrases() {
             const opts = {
                 text: phrase,
                 target_language_code: 'hi-IN',
-                speaker: 'meera',
-                pace: 1.1,
-                speech_sample_rate: 16000,
-                enable_preprocessing: false,
+                speaker: 'abhilash',
+                pace: 1.05,
+                loudness: 1.2,
+                speech_sample_rate: 24000,
+                enable_preprocessing: true,
                 model: 'bulbul:v2'
             };
             

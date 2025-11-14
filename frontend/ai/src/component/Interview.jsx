@@ -896,6 +896,10 @@ if(sessionId && blob && blob.size > 0){
 
       // const hardcodedValue = 'नमस्ते, इंटरव्यू शुरू करने के लिए अपना परिचय दें।';
       const hardcodedValue = language === "Hindi" ? 'नमस्ते, इंटरव्यू शुरू करने के लिए अपना परिचय दें।' : 'Hello, please introduce yourself to start the interview.';
+      
+      // Show the initial AI message in chat
+      setMessages((prev) => [...prev, { sender: 'ai', text: hardcodedValue }]);
+      
       await textToSpeech(hardcodedValue);
 
       const recorder = new SimpleVoiceRecorder();
@@ -1389,8 +1393,8 @@ if(sessionId && blob && blob.size > 0){
     {uploadedVideoUrl && !isUploading && (
       <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
         <div className="pointer-events-auto bg-green-900/90 text-white p-6 rounded-xl border border-green-600 shadow-lg">
-          <div className="font-bold text-xl">Interview end and here is your interview video</div>
-          <div className="text-sm mt-2 break-all">{uploadedVideoUrl}</div>
+          <div className="font-bold text-xl">Interview end and here </div>
+          <div className="text-sm mt-2 break-all">video upload successfully</div>
         </div>
       </div>
     )}

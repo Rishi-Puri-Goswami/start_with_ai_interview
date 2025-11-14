@@ -66,7 +66,7 @@ const loginusergoogle = async (req, res) => {
 
 
             if (find_candidate.numberofattempt >= 1) {
-                return res.status(403).json({ message: "you have exceeded the number of attempts", status: 403 });
+                return res.status(406).json({ message: "you have exceeded the number of attempts", status: 403 });
             }
 
 

@@ -83,9 +83,10 @@ async function createAndPlayAudio(base64Data, autoPlay = true) {
        
         console.log('✅ Audio blob created:', audioBlob.size, 'bytes');
         
-        // Create audio element
+        // Create audio element with buffering
         const audio = new Audio(audioUrl);
         audio.preload = 'auto';
+        audio.crossOrigin = 'anonymous'; // Enable CORS for audio context
 
         // Route audio through the mixing context for recording
         const { audioContext, destination } = getAudioMixingContext();
@@ -102,6 +103,7 @@ async function createAndPlayAudio(base64Data, autoPlay = true) {
                     URL.revokeObjectURL(audioUrl);
                     audio.removeEventListener('ended', onEnded);
                     audio.removeEventListener('error', onError);
+                    audio.removeEventListener('canplaythrough', onCanPlay);
                 };
 
                 const onEnded = () => {
@@ -125,10 +127,21 @@ async function createAndPlayAudio(base64Data, autoPlay = true) {
                     });
                 };
 
+                let canPlayFired = false;
+                const onCanPlay = () => {
+                    if (canPlayFired) return;
+                    canPlayFired = true;
+                    console.log('🎵 Audio buffered and ready to play');
+                    // Audio is fully buffered, safe to play without stuttering
+                    audio.play().catch(onError);
+                };
+
                 audio.addEventListener('ended', onEnded);
                 audio.addEventListener('error', onError);
+                audio.addEventListener('canplaythrough', onCanPlay);
 
-                audio.play().catch(onError);
+                // Start loading the audio
+                audio.load();
             });
         } else {
             // Non-autoPlay: return immediately
@@ -304,11 +317,14 @@ async function textToSpeechStreaming(inputText, options = {}) {
                 const audio = nextAudio.result.audioElement;
                 
                 await new Promise((resolve, reject) => {
+                    let canPlayFired = false;
+                    
                     audio.onended = () => {
                         console.log(`✅ Finished sentence ${nextAudio.index + 1}`);
                         currentlyPlaying = null;
                         resolve();
-                        playNext(); // Play next in queue
+                        // Small delay (50ms) between sentences for smoother transition
+                        setTimeout(() => playNext(), 50);
                     };
                     
                     audio.onerror = (e) => {
@@ -317,7 +333,16 @@ async function textToSpeechStreaming(inputText, options = {}) {
                         reject(e);
                     };
                     
-                    audio.play().catch(reject);
+                    // Wait for audio to be fully buffered before playing
+                    audio.addEventListener('canplaythrough', () => {
+                        if (canPlayFired) return;
+                        canPlayFired = true;
+                        console.log(`🎵 Sentence ${nextAudio.index + 1} buffered, starting playback`);
+                        audio.play().catch(reject);
+                    }, { once: true });
+                    
+                    // Start loading
+                    audio.load();
                 });
             } catch (error) {
                 console.error('Playback error:', error);
@@ -390,16 +415,16 @@ async function textToSpeech(inputText, options = {}) {
             throw new Error('Invalid input: text must be a non-empty string');
         }
 
-        // OPTIMIZED: Faster settings for lower latency (60-70% improvement)
+        // OPTIMIZED: Balance between quality and speed
         const { 
             autoPlay = true, 
             target_language_code = "hi-IN", 
             speaker = "abhilash", 
             pitch = 0, 
-            pace = 1.1,                        // ✅ 10% faster speech
-            loudness = 1, 
-            speech_sample_rate = 16000,        // ✅ Lower sample rate = faster generation
-            enable_preprocessing = false,      // ✅ Skip preprocessing for speed
+            pace = 1.05,                       // ✅ 5% faster (reduced from 10% for better clarity)
+            loudness = 1.2,                    // ✅ Increased volume for better clarity
+            speech_sample_rate = 24000,        // ✅ Higher sample rate = better audio quality (was 16000)
+            enable_preprocessing = true,       // ✅ Enable preprocessing for clearer audio
             model = "bulbul:v2"                // ✅ Use v2 (v1 no longer supported by Sarvam API)
         } = options;
 

@@ -20,10 +20,16 @@ const Login = () => {
 
 const { id } = useParams(); 
 const navigate = useNavigate();
+const [errorMessage, setErrorMessage] = React.useState('');
+const [isLoading, setIsLoading] = React.useState(false);
+
 console.log("Login component, ID from URL:", id);
 
   const handleSuccess = async (credentialResponse) => {
     try {
+      setIsLoading(true);
+      setErrorMessage(''); // Clear any previous errors
+      
       // credentialResponse contains an encoded JWT credential (id_token)
       // Send it to the backend to verify/create user and get our token
       const idToken = credentialResponse.credential;
@@ -46,6 +52,7 @@ console.log("Login component, ID from URL:", id);
       });
 
       const data = res.data;
+
       if (res.status === 200) {
         // Persist JWT in localStorage for socket handshake and API calls
         if (data.token) {
@@ -71,23 +78,52 @@ console.log("Login component, ID from URL:", id);
           navigate(`/${id}/notice`);
         } else {
           console.error('No ID found in URL');
-          alert('Session ID not found. Please use a valid interview URL.');
+          setErrorMessage('Session ID not found. Please use a valid interview URL.');
         }
 
       }
     } catch (err) {
       console.error('Login error', err);
+      
+      // Handle different types of errors from backend
       if (err.response) {
         // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
+        const status = err.response.status;
+        const message = err.response.data?.message || 'An error occurred during login';
+        
         console.error('Login failed', err.response.data);
+        
+        // Handle specific error codes
+        switch (status) {
+          case 403:
+            setErrorMessage('❌ Access Denied: You are not authorized for this interview session.');
+            break;
+          case 404:
+            setErrorMessage('❌ Interview session not found. Please check your invitation link.');
+            break;
+          case 406:
+            setErrorMessage('❌ You have exceeded the maximum number of attempts for this interview.');
+            break;
+          case 400:
+            setErrorMessage(`❌ ${message}`);
+            break;
+          case 500:
+            setErrorMessage('❌ Server error occurred. Please try again later.');
+            break;
+          default:
+            setErrorMessage(`❌ ${message}`);
+        }
       } else if (err.request) {
         // The request was made but no response was received
         console.error('No response received from server');
+        setErrorMessage('❌ Unable to connect to server. Please check your internet connection and try again.');
       } else {
         // Something happened in setting up the request that triggered an Error
         console.error('Error setting up request:', err.message);
+        setErrorMessage('❌ An unexpected error occurred. Please try again.');
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -123,17 +159,32 @@ console.log("Login component, ID from URL:", id);
         </div>
 
         </div>
+        
+        {/* Error Message Display */}
+        {errorMessage && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700 text-sm font-medium">{errorMessage}</p>
+          </div>
+        )}
+        
         {/* Google Login Button */}
-        <div className="w-[20vw]  items-center    flex ">
-          <GoogleLogin 
-            onSuccess={handleSuccess} 
-            onError={handleError}
-            width="100%"
-            theme="outline"
-            size="large"
-            text="continue_with"
-            shape="rectangular"
-          />
+        <div className="w-[20vw] items-center flex">
+          {isLoading ? (
+            <div className="w-full p-4 bg-gray-100 rounded-md flex items-center justify-center gap-2">
+              <div className="w-5 h-5 border-2 border-t-transparent border-gray-600 rounded-full animate-spin"></div>
+              <span className="text-gray-600 font-medium">Signing in...</span>
+            </div>
+          ) : (
+            <GoogleLogin 
+              onSuccess={handleSuccess} 
+              onError={handleError}
+              width="100%"
+              theme="outline"
+              size="large"
+              text="continue_with"
+              shape="rectangular"
+            />
+          )}
         </div>
       </div>
     </div>
