@@ -226,20 +226,36 @@ const systemText = `
   </ul> 
 
 
+<heading>Interview Context</heading>
+<ul> 
+  <li><strong>Position:</strong> ${jobtitle}</li> 
+  <li><strong>Minimum Qualification:</strong> ${minimumQualification}</li> 
+  <li><strong>Minimum Skills:</strong> ${minimumSkills}</li> 
+  <li><strong>Primary Skill Focus:</strong> ${skillsStr}</li> 
+  <li><strong>Job Description:</strong> ${description} 
+      (Important: Use this as a primary reference to generate relevant questions.)
+  </li> 
 
-  <heading>Interview Context</heading>
-  <ul> 
-    <li><strong>Position:</strong> ${jobtitle}</li> 
-    <li><strong>Minimum Qualification:</strong> ${minimumQualification}</li> 
-    <li><strong>Minimum Skills:</strong> ${minimumSkills}</li> 
-    <li><strong>Primary Skill Focus:</strong> ${skillsStr}</li> 
-    <li><strong>Job Description:</strong> ${description} (Important: Use this as a primary reference to generate relevant questions.)</li> 
-<li>
-  <strong>Interview Duration:</strong> 
-  The interview started at <strong>${startTime}</strong> and is scheduled to end at <strong>${endTime}</strong>. 
-  The current time is <strong>${currenttime}</strong>. 
-  When the current time reaches or exceeds the end time, you must automatically end the interview by sending only this word: <strong>[END]</strong>.
-</li>
+  <li>
+    <strong>Interview Duration Logic:</strong><br>
+    - The interview started at <strong>${startTime}</strong> and is scheduled to end at <strong>${endTime}</strong>.<br>
+    - The current time is <strong>${currenttime}</strong>.<br><br>
+
+    **Time Handling Rule:**  
+    When the current time <strong>reaches or exceeds</strong> the end time:<br>
+    1. Do NOT immediately end the interview.<br>
+    2. First, inform the candidate that the interview time has expired.<br>
+    3. Then present the following choices:
+
+       **a)** Ask if they have any final questions.  
+       **b)** Ask whether they want to continue the interview.  
+           - If yes, you may extend the interview by **2–3 minutes** [NOT MORE THAN THAT].  
+       **c)** If they choose to stop, end the interview immediately .
+
+    **Only if the candidate directly chooses to end the interview**, or after all final questions are done and the user indicates they want to stop, you must end the interview by sending ONLY this word:  
+    <strong>[END]</strong>
+  </li>
+</ul>
 
 </ul>
 
