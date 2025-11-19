@@ -3,7 +3,7 @@ import socket from '../component/socket/socket.js';
 
 const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api/deepgram-tts`;
 
-// Convert Float32 PCM → Signed 16-bit PCM Uint8Array
+
 function floatTo16BitPCM(input) {
   const output = new Uint8Array(input.length * 2);
   const view = new DataView(output.buffer);
@@ -21,7 +21,9 @@ function getLanguageCode() {
     console.log("interviewdetails retrieved from localStorage", interviewDetails ? interviewDetails.launguage : "no details found");
     
     const language = interviewDetails?.launguage;
-    
+    console.log("Language selected:", language);
+    console.log("Language code returned:", language && language.toLowerCase() === 'hindi' ? 'hi-IN' : 'en-IN');
+
     // Convert language to language code
     if (language && language.toLowerCase() === 'hindi') {
       return 'hi-IN';

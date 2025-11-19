@@ -164,6 +164,7 @@ const systemText = `
     <li>Speak naturally in ${language}, based on the candidate’s comfort.</li> 
     <li> the whole conversation go in this language = ${language} </li>
     <li> don't change the language on the candidate request </li>
+    <Strong> don't change the language on the candidate request stickon this language = ${language}</Strong>
     <li>Maintain a tone that is professional, polite, and confident — like a senior expert representing the company.</li> 
     <li>For technical roles, use precise industry terminology. For creative or management roles, focus on decision-making and reasoning depth.</li> 
   </ul>
@@ -270,7 +271,7 @@ const systemText = `
 
   try {
     const model = ai.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.0-flash-lite',
       systemInstruction: systemText,
       generationConfig: {
         temperature: 0.4,
@@ -305,6 +306,8 @@ const systemText = `
     console.error('[AI Service] getAiResponse error:', error?.message || error, error?.stack || 'no stack');
     // Keep the client-facing message generic but include a hint to check server logs
     
+    console.log("error in gimine ai" , error);
+
 return language === "English"
     ? "Due to some issues, I couldn’t understand this properly. Could you please repeat the answer?"
     : "कुछ समस्या के कारण मैं इसे ठीक से समझ नहीं पाया, क्या आप कृपया इसका उत्तर दोबारा बता सकते हैं?";  }
